@@ -1,0 +1,68 @@
+# === Model ===
+model:
+  name: Qwen/Qwen3-8B
+  # after SFT, point to merged model:
+  # name: ./output/merged
+  max_seq_length: 4096
+  load_in_4bit: false
+  lora_rank: 64
+
+# === LoRA ===
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0.0
+  target_modules: all-linear
+  task_type: CAUSAL_LM
+  bias: none
+
+# === Data ===
+data:
+  dataset: Team-ACE/ToolACE
+
+# === Reward weights ===
+reward:
+  format_weight: 0.1
+  tool_name_weight: 0.5
+  tool_args_weight: 0.4
+
+# === GRPOConfig ===
+grpo:
+  output_dir: ./output_grpo
+  num_train_epochs: 1
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 5.0e-6
+  weight_decay: 0.1
+  max_grad_norm: 0.1
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.1
+  bf16: true
+  logging_steps: 1
+  logging_first_step: true
+  report_to:
+    - trackio
+    - tensorboard
+  project: qwen3-8b-toolace-grpo
+  run_name: qwen3-8b-toolace-grpo
+  save_strategy: epoch
+  save_total_limit: 2
+  gradient_checkpointing: true
+  seed: 42
+
+  # --- GRPO specific ---
+  num_generations: 8
+  max_completion_length: 512
+  max_prompt_length: 3584
+  temperature: 1.5
+  top_p: 0.95
+  min_p: 0.05
+  beta: 0.04
+  loss_type: dapo
+  scale_rewards: group
+  log_completions: true
+
+# === Merge & Save ===
+merge:
+  enabled: true
+  output_dir: ./output_grpo/merged
