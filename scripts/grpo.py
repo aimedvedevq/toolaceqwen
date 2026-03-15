@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
-"""GRPO training on ToolACE with Unsloth + custom reward functions."""
+"""
+GRPO training on ToolACE with Unsloth + custom reward functions.
+
+Usage:
+    python scripts/grpo.py                                        # full training
+    python scripts/grpo.py model.name=./output/merged             # from SFT checkpoint
+    python scripts/grpo.py --dry-run --max-samples=20             # smoke test
+"""
 
 import argparse
 import ast
+import os
+import random
 import re
 import json
 from pathlib import Path
 
+import numpy as np
+import torch
 from datasets import load_dataset
 from omegaconf import OmegaConf
+from transformers import set_seed
 from unsloth import FastLanguageModel
 from trl import GRPOConfig, GRPOTrainer
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
 from data_utils import (
     convert_toolace_example, extract_tools_from_system,
     toolace_to_openai_tools, is_tool_call, parse_bracket_calls,
@@ -241,9 +255,17 @@ def tool_args_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
 # Main
 # ─────────────────────────────────────────────────────────────
 
+SEED = 42
+
 def main():
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    set_seed(SEED)
+    os.environ["PYTHONHASHSEED"] = str(SEED)
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="conf/grpo.yaml")
+    parser.add_argument("--config", default="configs/grpo.yaml")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-samples", type=int, default=None)
     args, overrides = parser.parse_known_args()
