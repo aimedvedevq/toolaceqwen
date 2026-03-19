@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
 """
-Concurrent inference benchmark via vLLM OpenAI API.
+Inference benchmark using vllm bench serve (standard vLLM benchmarking tool).
 
-Measures per-request TTFT, latency, throughput at various concurrency levels.
-Reports distributions: mean, std, SEM, p25/p50/p75/p90/p95/p99.
+Measures TTFT, TPOT, ITL, E2EL with full percentile distributions
+at each concurrency level. Uses tool-calling requests via --extra-body.
 
 Usage:
-    # Start vLLM server first:
-    python -m vllm.entrypoints.openai.api_server --model ./output_grpo/merged --port 8100
+    # Benchmark a running server:
+    python scripts/bench.py --port 8100
 
-    # Then benchmark:
-    python scripts/bench.py --url http://localhost:8100/v1/chat/completions
-    python scripts/bench.py --url http://localhost:8100/v1/chat/completions --concurrency 1,8,16,32
+    # Specific concurrency levels:
+    python scripts/bench.py --port 8100 --concurrency 1,16,32
+
+    # Full suite — starts/stops vLLM for BF16, FP8, W4A16:
+    python scripts/bench.py --suite
 """
 
 import argparse
-import asyncio
 import json
 import os
-import random
+import subprocess
+import sys
+import tempfile
 import time
 import urllib.request
 
-import aiohttp
-import numpy as np
-
-SEED = 42
-
-QUERIES = [
+PROMPTS = [
     "What's the weather like in Tokyo right now?",
     "Find me Italian restaurants in San Francisco",
     "Calculate the compound interest on $10000 at 5% for 3 years",
@@ -51,140 +49,245 @@ QUERIES = [
 ]
 
 TOOLS = [
-    {"type": "function", "function": {"name": "get_weather", "description": "Get weather",
-        "parameters": {"type": "object", "properties": {"city": {"type": "string"}, "units": {"type": "string"}}, "required": ["city"]}}},
-    {"type": "function", "function": {"name": "search_restaurants", "description": "Search restaurants",
-        "parameters": {"type": "object", "properties": {"cuisine": {"type": "string"}, "location": {"type": "string"}}, "required": ["cuisine", "location"]}}},
-    {"type": "function", "function": {"name": "calculate", "description": "Calculate math",
-        "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}, "required": ["expression"]}}},
-    {"type": "function", "function": {"name": "book_flight", "description": "Book flight",
-        "parameters": {"type": "object", "properties": {"origin": {"type": "string"}, "destination": {"type": "string"}, "date": {"type": "string"}}, "required": ["origin", "destination", "date"]}}},
-    {"type": "function", "function": {"name": "translate_text", "description": "Translate",
-        "parameters": {"type": "object", "properties": {"text": {"type": "string"}, "target_lang": {"type": "string"}}, "required": ["text", "target_lang"]}}},
+    {"type": "function", "function": {
+        "name": "get_weather", "description": "Get current weather for a city",
+        "parameters": {"type": "object", "properties": {
+            "city": {"type": "string", "description": "City name"},
+            "units": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+        }, "required": ["city"]}}},
+    {"type": "function", "function": {
+        "name": "search_restaurants", "description": "Search for restaurants",
+        "parameters": {"type": "object", "properties": {
+            "cuisine": {"type": "string"}, "location": {"type": "string"},
+            "price_range": {"type": "string"}
+        }, "required": ["cuisine", "location"]}}},
+    {"type": "function", "function": {
+        "name": "calculate", "description": "Evaluate a math expression",
+        "parameters": {"type": "object", "properties": {
+            "expression": {"type": "string"}
+        }, "required": ["expression"]}}},
+    {"type": "function", "function": {
+        "name": "book_flight", "description": "Book a flight",
+        "parameters": {"type": "object", "properties": {
+            "origin": {"type": "string"}, "destination": {"type": "string"},
+            "date": {"type": "string"}, "passengers": {"type": "integer"}
+        }, "required": ["origin", "destination", "date"]}}},
+    {"type": "function", "function": {
+        "name": "translate_text", "description": "Translate text to another language",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string"}, "target_language": {"type": "string"}
+        }, "required": ["text", "target_language"]}}},
 ]
 
-_model_name = None
+SUITE_CONFIGS = [
+    ("BF16",         "./output_grpo/merged", []),
+    ("FP8_dynamic",  "./output_grpo/merged", ["--quantization", "fp8"]),
+    ("W4A16",        "./output_grpo/w4a16",  ["--quantization", "compressed-tensors"]),
+]
 
 
-def build_request(idx):
-    return {
-        "model": _model_name,
-        "messages": [{"role": "user", "content": QUERIES[idx % len(QUERIES)]}],
+def make_prompts_file():
+    """Write benchmark prompts to a temporary JSONL file."""
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+    for p in PROMPTS:
+        f.write(json.dumps({"prompt": p}) + "\n")
+    f.close()
+    return f.name
+
+
+def run_vllm_bench(port, concurrency, num_prompts, result_dir, label,
+                   prompts_path, model=None):
+    """Run vllm bench serve for one concurrency level."""
+    extra = json.dumps({
         "tools": TOOLS,
-        "max_tokens": 256,
-        "temperature": 0,
-        "stream": False,
-    }
+        "tool_choice": "auto",
+        "chat_template_kwargs": {"enable_thinking": False},
+    })
+
+    result_file = f"{label}_c{concurrency}.json"
+    cmd = [
+        sys.executable, "-m", "vllm", "bench", "serve",
+        "--backend", "openai-chat",
+        "--port", str(port),
+        "--endpoint", "/v1/chat/completions",
+        "--dataset-name", "custom",
+        "--dataset-path", prompts_path,
+        "--num-prompts", str(num_prompts),
+        "--max-concurrency", str(concurrency),
+        "--request-rate", "inf",
+        "--extra-body", extra,
+        "--percentile-metrics", "ttft,tpot,itl,e2el",
+        "--metric-percentiles", "25,50,75,90,95,99",
+        "--custom-output-len", "256",
+        "--save-result",
+        "--result-dir", result_dir,
+        "--result-filename", result_file,
+        "--label", f"{label}_c{concurrency}",
+        "--num-warmups", "5",
+        "--seed", "42",
+    ]
+    if model:
+        cmd += ["--model", model]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+    output = result.stdout + result.stderr
+    for line in output.splitlines():
+        if any(k in line.lower() for k in ["throughput", "ttft", "tpot", "e2el"]):
+            print(f"    {line.strip()}")
+
+    if result.returncode != 0:
+        err = result.stderr[-300:] if result.stderr else "unknown error"
+        print(f"    FAILED: {err}")
+        return None
+
+    result_path = os.path.join(result_dir, result_file)
+    if os.path.exists(result_path):
+        with open(result_path) as f:
+            return json.load(f)
+    return None
 
 
-async def send_request(session, url, request):
-    t0 = time.perf_counter()
-    try:
-        async with session.post(url, json=request) as resp:
-            body = await resp.json()
-        t_total = time.perf_counter() - t0
-        usage = body.get("usage", {})
-        comp_tok = usage.get("completion_tokens", 0)
-        return {
-            "success": True,
-            "latency": t_total,
-            "ttft": t_total / max(comp_tok, 1),
-            "completion_tokens": comp_tok,
-            "prompt_tokens": usage.get("prompt_tokens", 0),
-        }
-    except Exception as e:
-        return {"success": False, "latency": time.perf_counter() - t0, "error": str(e)}
+def wait_server(port, timeout=240):
+    for _ in range(timeout // 3):
+        time.sleep(3)
+        try:
+            r = urllib.request.urlopen(f"http://localhost:{port}/v1/models")
+            data = json.loads(r.read())
+            return data["data"][0]["id"]
+        except Exception:
+            pass
+    return None
 
 
-async def run_batch(url, concurrency, n):
-    sem = asyncio.Semaphore(concurrency)
-    async def limited(idx):
-        async with sem:
-            async with aiohttp.ClientSession() as s:
-                return await send_request(s, url, build_request(idx))
-    tasks = [limited(i) for i in range(n)]
-    return await asyncio.gather(*tasks)
+def kill_port(port):
+    os.system(f"fuser -k {port}/tcp 2>/dev/null")
+    os.system("pkill -9 -f 'vllm.entrypoints' 2>/dev/null")
+    os.system("pkill -9 -f 'vllm' 2>/dev/null")
+    time.sleep(5)
+    for _ in range(10):
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            mem = int(result.stdout.strip().split("\n")[0])
+            if mem < 1000:
+                return
+        time.sleep(3)
+    print("  WARNING: GPU memory not fully freed")
 
 
-def compute_stats(results):
-    ok = [r for r in results if r.get("success")]
-    if not ok:
-        return {"error": "all failed", "n": 0}
-    lats = np.array([r["latency"] for r in ok]) * 1000
-    ttfts = np.array([r["ttft"] for r in ok]) * 1000
-    toks = np.array([r["completion_tokens"] for r in ok])
-    n = len(lats)
-    def dist(arr):
-        return {
-            "mean": float(np.mean(arr)), "std": float(np.std(arr)),
-            "sem": float(np.std(arr) / np.sqrt(n)),
-            "min": float(np.min(arr)), "max": float(np.max(arr)),
-            "p25": float(np.percentile(arr, 25)), "p50": float(np.median(arr)),
-            "p75": float(np.percentile(arr, 75)), "p90": float(np.percentile(arr, 90)),
-            "p95": float(np.percentile(arr, 95)), "p99": float(np.percentile(arr, 99)),
-        }
-    return {
-        "n": n, "failed": len(results) - n,
-        "latency_ms": dist(lats), "ttft_ms": dist(ttfts),
-        "tps": float(toks.sum() / (lats.sum() / 1000)),
-        "avg_tokens": float(np.mean(toks)),
-    }
+def bench_config(port, label, concurrency_levels, num_prompts, result_dir,
+                 prompts_path, model=None):
+    """Benchmark one model config across all concurrency levels."""
+    results = {}
+    for c in concurrency_levels:
+        print(f"  c={c:>2d} ({num_prompts} prompts)...")
+        data = run_vllm_bench(
+            port, c, num_prompts, result_dir, label, prompts_path, model,
+        )
+        results[c] = data
+    return results
+
+
+def run_suite(concurrency_levels, num_prompts, result_dir, port=8100):
+    """Start/stop vLLM servers for each config and benchmark."""
+    prompts_path = make_prompts_file()
+    all_results = {}
+
+    for label, model_path, extra_args in SUITE_CONFIGS:
+        if not os.path.exists(model_path):
+            print(f"\n  Skipping {label}: {model_path} not found")
+            continue
+
+        print(f"\n{'='*60}")
+        print(f"  {label}")
+        print(f"{'='*60}")
+
+        kill_port(port)
+        cmd = [
+            sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+            "--model", model_path,
+            "--port", str(port),
+            "--dtype", "auto",
+            "--trust-remote-code",
+            "--max-model-len", "4096",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "hermes",
+        ] + extra_args
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        model_name = wait_server(port)
+
+        if not model_name:
+            print(f"  FAILED to start server")
+            proc.kill()
+            all_results[label] = {"error": "server failed to start"}
+            continue
+
+        print(f"  Server ready: {model_name}")
+        all_results[label] = bench_config(
+            port, label, concurrency_levels, num_prompts,
+            result_dir, prompts_path, model_name,
+        )
+
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+        kill_port(port)
+
+    os.unlink(prompts_path)
+    return all_results
+
+
+def run_single(port, concurrency_levels, num_prompts, result_dir):
+    """Benchmark an already-running server."""
+    models_url = f"http://localhost:{port}/v1/models"
+    data = json.loads(urllib.request.urlopen(models_url).read())
+    model_name = data["data"][0]["id"]
+    print(f"Model: {model_name}")
+
+    prompts_path = make_prompts_file()
+    label = model_name.replace("/", "_")
+    results = bench_config(
+        port, label, concurrency_levels, num_prompts,
+        result_dir, prompts_path, model_name,
+    )
+    os.unlink(prompts_path)
+    return {label: results}
 
 
 def main():
-    random.seed(SEED)
-    np.random.seed(SEED)
-
-    parser = argparse.ArgumentParser(description="Concurrent Inference Benchmark")
-    parser.add_argument("--url", required=True, help="vLLM chat completions URL")
+    parser = argparse.ArgumentParser(
+        description="Inference benchmark using vllm bench serve",
+    )
+    parser.add_argument("--port", type=int, default=8100)
+    parser.add_argument("--suite", action="store_true",
+                        help="Full suite: BF16/FP8/W4A16 with server management")
     parser.add_argument("--concurrency", default="1,4,8,16,32")
     parser.add_argument("--num-prompts", type=int, default=100)
-    parser.add_argument("--warmup", type=int, default=5)
-    parser.add_argument("--output", default="results/bench_latency.json")
+    parser.add_argument("--result-dir", default="results/bench")
     args = parser.parse_args()
 
     levels = [int(c) for c in args.concurrency.split(",")]
+    os.makedirs(args.result_dir, exist_ok=True)
 
-    # Get model name
-    global _model_name
-    models_url = args.url.replace("/chat/completions", "/models")
-    models = json.loads(urllib.request.urlopen(models_url).read())
-    _model_name = models["data"][0]["id"]
-    print(f"Model: {_model_name}")
+    if args.suite:
+        results = run_suite(levels, args.num_prompts, args.result_dir, args.port)
+    else:
+        results = run_single(
+            args.port, levels, args.num_prompts, args.result_dir,
+        )
 
-    # Warmup
-    print(f"Warmup ({args.warmup} requests)...")
-    asyncio.run(run_batch(args.url, 1, args.warmup))
-
-    all_stats = {}
-    for c in levels:
-        print(f"\n--- Concurrency: {c} ({args.num_prompts} requests) ---")
-        results = asyncio.run(run_batch(args.url, c, args.num_prompts))
-        stats = compute_stats(results)
-        all_stats[c] = stats
-        if "error" not in stats:
-            l, t = stats["latency_ms"], stats["ttft_ms"]
-            print(f"  Latency: mean={l['mean']:.0f}±{l['std']:.0f}ms  p50={l['p50']:.0f}  p95={l['p95']:.0f}  p99={l['p99']:.0f}")
-            print(f"  TTFT:    mean={t['mean']:.1f}±{t['std']:.1f}ms  p50={t['p50']:.1f}  p95={t['p95']:.1f}  p99={t['p99']:.1f}")
-            print(f"  TPS: {stats['tps']:.0f}  avg_tokens: {stats['avg_tokens']:.0f}")
-
-    # Summary table
-    print(f"\n{'='*110}")
-    print(f"{'C':>3s} {'n':>5s} {'Lat mean±std':>16s} {'Lat p50':>9s} {'Lat p95':>9s} {'Lat p99':>9s} "
-          f"{'TTFT p50':>9s} {'TTFT p95':>9s} {'TPS':>7s}")
-    print(f"{'-'*110}")
-    for c, s in sorted(all_stats.items()):
-        if "error" in s: continue
-        l, t = s["latency_ms"], s["ttft_ms"]
-        print(f"{c:>3d} {s['n']:>5d} {l['mean']:>7.0f}±{l['std']:<6.0f}ms {l['p50']:>8.0f}ms {l['p95']:>8.0f}ms "
-              f"{l['p99']:>8.0f}ms {t['p50']:>8.1f}ms {t['p95']:>8.1f}ms {s['tps']:>6.0f}")
-    print(f"{'='*110}")
-
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    with open(args.output, "w") as f:
-        json.dump({"model": _model_name, "seed": SEED, "num_prompts": args.num_prompts,
-                   "stats": {str(k): v for k, v in all_stats.items()}}, f, indent=2)
-    print(f"\nSaved to {args.output}")
+    summary_path = os.path.join(args.result_dir, "summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+    print(f"\nResults saved to {args.result_dir}/")
+    print(f"Summary: {summary_path}")
 
 
 if __name__ == "__main__":

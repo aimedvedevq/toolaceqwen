@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Model outputs (large binary weights — not tracked)
+output/
+output_*/
+grpo_trainer_lora_model/
+
+# Keep results/ tracked (small JSON files that ARE the deliverable)
+# !results/
+results/
+.jsonl
+
+
+# Compiled caches
+unsloth_compiled_cache/
+
+# Logs
+*.log
+logs/
+
+# Generated reports
+report.html
+report_rendered.ipynb
+report_executed.ipynb
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.swp
+*~

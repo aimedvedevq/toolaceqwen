@@ -33,10 +33,6 @@ from data_utils import (
 )
 
 
-# ─────────────────────────────────────────────────────────────
-# Dataset: ToolACE → single-step prompt/completion pairs
-# ─────────────────────────────────────────────────────────────
-
 def build_grpo_dataset(ds, tokenizer):
     """Convert ToolACE to single-step: prompt with tools, ground truth = tool call.
     Only keeps first assistant tool call per example."""
@@ -128,10 +124,6 @@ def extract_tool_calls(text: str) -> list[dict]:
     return calls
 
 
-# ─────────────────────────────────────────────────────────────
-# Reward functions
-# ─────────────────────────────────────────────────────────────
-
 def get_completion_text(completion) -> str:
     """Extract text from completion regardless of format."""
     if isinstance(completion, list):
@@ -141,10 +133,11 @@ def get_completion_text(completion) -> str:
 
 def format_reward_fn(completions, trainer_state=None, **kwargs) -> list[float]:
     """Reward for correct <tool_call> JSON format.
-    Decays from 1.0 to 0 by 50% of training."""
+    Uses fine-grained scoring for more within-group variance.
+    Decays from 1.0 to 0.1 over training (never fully zero)."""
     max_steps = trainer_state.max_steps if trainer_state else 1
     progress = (trainer_state.global_step / max_steps) if trainer_state else 0
-    decay = max(0.0, 1.0 - progress / 0.5)
+    decay = max(0.1, 1.0 - progress * 0.9)
 
     rewards = []
     for completion in completions:
@@ -152,15 +145,24 @@ def format_reward_fn(completions, trainer_state=None, **kwargs) -> list[float]:
         text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
         score = 0.0
-        # Check <tool_call>{"name": ..., "arguments": ...}</tool_call> format
-        if re.search(r'<tool_call>\s*\{.*?"name".*?"arguments".*?\}\s*</tool_call>', text, re.DOTALL):
-            score = 1.0
-        # Partial: has tool_call tags but malformed JSON
+        tc_match = re.search(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', text, re.DOTALL)
+        if tc_match:
+            try:
+                obj = json.loads(tc_match.group(1))
+                if "name" in obj and "arguments" in obj:
+                    score = 1.0
+                elif "name" in obj:
+                    score = 0.8
+                else:
+                    score = 0.6
+            except json.JSONDecodeError:
+                score = 0.4  
         elif '<tool_call>' in text and '</tool_call>' in text:
-            score = 0.5
-        # Also accept bracket format [func(args)] as partial
-        elif re.search(r'\[[\w\s]+\(.*?\)\]', text):
             score = 0.3
+        elif re.search(r'\[[\w\s]+\(.*?\)\]', text):
+            score = 0.2
+        elif text.strip():
+            score = 0.05 
 
         rewards.append(score * decay)
 
@@ -168,7 +170,8 @@ def format_reward_fn(completions, trainer_state=None, **kwargs) -> list[float]:
 
 
 def tool_name_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
-    """Reward for calling the correct tool name."""
+    """Reward for calling the correct tool name.
+    Fine-grained: exact match > partial overlap > count match > wrong."""
     rewards = []
     for completion, gt in zip(completions, ground_truth):
         text = get_completion_text(completion)
@@ -177,21 +180,31 @@ def tool_name_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
         gt_calls = extract_tool_calls(gt)
 
         if not gt_calls:
+            rewards.append(1.0 if not pred_calls else 0.0)
+            continue
+
+        pred_names = [c["name"] for c in pred_calls]
+        gt_names = [c["name"] for c in gt_calls]
+
+        if not pred_names:
             rewards.append(0.0)
             continue
 
-        pred_names = set(c["name"] for c in pred_calls)
-        gt_names = set(c["name"] for c in gt_calls)
+        pred_set = set(pred_names)
+        gt_set = set(gt_names)
 
-        if not gt_names:
-            rewards.append(0.0)
-        elif pred_names == gt_names:
+        if pred_names == gt_names:
             rewards.append(1.0)
+        elif pred_set == gt_set:
+            rewards.append(0.85)
+        elif pred_set & gt_set:
+            overlap = len(pred_set & gt_set)
+            total = len(gt_set)
+            rewards.append(0.3 + 0.5 * (overlap / total))
+        elif len(pred_names) == len(gt_names):
+            rewards.append(0.1)
         else:
-            # Partial credit: intersection / union
-            overlap = len(pred_names & gt_names)
-            total = len(gt_names)
-            rewards.append(overlap / total)
+            rewards.append(0.0)
 
     return rewards
 
@@ -213,7 +226,6 @@ def tool_args_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
         matched = 0
 
         for gt_call in gt_calls:
-            # Find matching pred call by name
             pred_match = None
             for pc in pred_calls:
                 if pc["name"] == gt_call["name"]:
@@ -231,7 +243,6 @@ def tool_args_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
                 total_score += 1.0
                 continue
 
-            # Score: fraction of args that match
             arg_scores = []
             for key, gt_val in gt_args.items():
                 if key in pred_args:
@@ -239,7 +250,6 @@ def tool_args_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
                     if str(pred_val).strip() == str(gt_val).strip():
                         arg_scores.append(1.0)
                     else:
-                        # Partial: at least the arg name was right
                         arg_scores.append(0.3)
                 else:
                     arg_scores.append(0.0)
@@ -251,9 +261,6 @@ def tool_args_reward_fn(completions, ground_truth, **kwargs) -> list[float]:
     return rewards
 
 
-# ─────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────
 
 SEED = 42
 
@@ -286,7 +293,6 @@ def main():
         gpu_memory_utilization=0.6,
     )
 
-    # Patch chat template to disable thinking by default
     if tokenizer.chat_template and "enable_thinking" in tokenizer.chat_template:
         tokenizer.chat_template = tokenizer.chat_template.replace(
             "enable_thinking is true",
@@ -310,8 +316,6 @@ def main():
         random_state=42,
     )
 
-    # --- Dataset ---
-    # Try saved GRPO split first, fallback to full dataset
     grpo_data_path = Path("./output/grpo_data")
     if grpo_data_path.exists():
         from datasets import load_from_disk
@@ -330,7 +334,6 @@ def main():
     from datasets import Dataset
     train_ds = Dataset.from_list(samples)
 
-    # --- GRPOConfig ---
     grpo_dict = {k: v for k, v in OmegaConf.to_container(cfg.grpo, resolve=True).items() if v is not None}
 
     if args.dry_run:
@@ -342,12 +345,10 @@ def main():
 
     training_args = GRPOConfig(**grpo_dict)
 
-    # --- Reward functions with weights ---
     rw = cfg.reward
     reward_funcs = [format_reward_fn, tool_name_reward_fn, tool_args_reward_fn]
     reward_weights = [rw.format_weight, rw.tool_name_weight, rw.tool_args_weight]
 
-    # --- Trainer ---
     trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
@@ -359,7 +360,6 @@ def main():
 
     trainer.train()
 
-    # --- Save ---
     trainer.save_model(cfg.grpo.output_dir)
     tokenizer.save_pretrained(cfg.grpo.output_dir)
 

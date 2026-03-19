@@ -6,8 +6,9 @@
 #
 # Usage:
 #   bash scripts/serve.sh                                              # BF16
-#   bash scripts/serve.sh --quantization fp8                           # FP8
-#   MODEL=./output_grpo/awq bash scripts/serve.sh --quantization compressed-tensors  # W4A16
+#   bash scripts/serve.sh --quantization fp8                           # FP8 (recommended)
+#   bash scripts/serve.sh --quantization fp8 --speculative-config '{"method":"ngram","num_speculative_tokens":5,"prompt_lookup_max":5,"prompt_lookup_min":2}'  # FP8 + ngram (fastest)
+#   MODEL=./output_grpo/w4a16 bash scripts/serve.sh --quantization compressed-tensors  # W4A16
 #   MODEL=kenkaneki/Qwen3-8B-ToolACE bash scripts/serve.sh            # from HF Hub
 
 MODEL="${MODEL:-./output_grpo/merged}"

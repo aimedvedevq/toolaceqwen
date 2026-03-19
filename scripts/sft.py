@@ -9,12 +9,9 @@ Usage:
 """
 
 import argparse
-import json
+import logging
 import os
 import random
-import subprocess
-import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +22,9 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
 from peft import LoraConfig
 from trl import SFTTrainer, SFTConfig
 
-# ── Reproducibility ──
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
 SEED = 42
 
 def seed_everything(seed=SEED):
@@ -36,20 +35,20 @@ def seed_everything(seed=SEED):
     set_seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
 
-# ── Qwen3 special tokens ──
-IM_START = 151644
-IM_END = 151645
-ASSISTANT_TOKEN = 77091
+# Qwen3 chat-format token IDs (used for assistant-only loss masking)
+IM_START = 151644       # <|im_start|>
+IM_END = 151645         # <|im_end|>
+ASSISTANT_TOKEN = 77091 # "assistant"
 IGNORE_INDEX = -100
 
 ROLE_MAP = {"user": "user", "assistant": "assistant", "tool": "tool"}
-BFCL_CATEGORIES = "single_turn"
-BFCL_MODEL = "Qwen/Qwen3-8B"
-BFCL_ROOT = Path(__file__).parent.parent.parent / "gorilla" / "berkeley-function-call-leaderboard"
+
+_skipped_count = 0
 
 
 def tokenize_with_assistant_mask(example, tokenizer, max_length):
-    """Tokenize and mask labels: only supervise assistant turns."""
+    """Tokenize and mask labels so loss is computed only on assistant turns."""
+    global _skipped_count
     messages = []
     if example.get("system"):
         messages.append({"role": "system", "content": example["system"]})
@@ -59,13 +58,18 @@ def tokenize_with_assistant_mask(example, tokenizer, max_length):
 
     try:
         text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False, enable_thinking=False
+            messages, tokenize=False, add_generation_prompt=False,
+            enable_thinking=False,
         )
     except Exception:
+        _skipped_count += 1
+        if _skipped_count <= 5:
+            log.warning("Failed to apply chat template (skipped %d so far)",
+                        _skipped_count)
         return {"input_ids": [], "attention_mask": [], "labels": []}
 
     encoding = tokenizer(
-        text, truncation=True, max_length=max_length, add_special_tokens=False
+        text, truncation=True, max_length=max_length, add_special_tokens=False,
     )
     input_ids = encoding["input_ids"]
 
@@ -113,7 +117,8 @@ def main():
     skip_eval = args.skip_eval or args.dry_run
 
     # ── Data ──
-    print(f"Loading {cfg.data.dataset}...")
+    global _skipped_count
+    log.info("Loading %s...", cfg.data.dataset)
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -125,24 +130,32 @@ def main():
     # 70/30 split: SFT / GRPO reserved
     sft_grpo = ds.train_test_split(test_size=0.3, seed=SEED)
     sft_ds = sft_grpo["train"]
+    os.makedirs("./output", exist_ok=True)
     sft_grpo["test"].save_to_disk("./output/grpo_data")
-    print(f"SFT: {len(sft_ds)}, GRPO reserved: {len(sft_grpo['test'])}")
+    log.info("SFT: %d samples, GRPO reserved: %d samples",
+             len(sft_ds), len(sft_grpo["test"]))
 
     # 95/5 train/eval from SFT portion
     split = sft_ds.train_test_split(test_size=0.05, seed=SEED)
     train_ds, eval_ds = split["train"], split["test"]
 
+    _skipped_count = 0
     train_ds = train_ds.map(
         lambda ex: tokenize_with_assistant_mask(ex, tokenizer, cfg.sft.max_length),
         remove_columns=train_ds.column_names, num_proc=4, desc="Tokenizing train",
     ).filter(lambda ex: len(ex["input_ids"]) > 0)
+    if _skipped_count > 0:
+        log.warning("Skipped %d examples during train tokenization", _skipped_count)
 
+    _skipped_count = 0
     eval_ds = eval_ds.map(
         lambda ex: tokenize_with_assistant_mask(ex, tokenizer, cfg.sft.max_length),
         remove_columns=eval_ds.column_names, num_proc=4, desc="Tokenizing eval",
     ).filter(lambda ex: len(ex["input_ids"]) > 0)
+    if _skipped_count > 0:
+        log.warning("Skipped %d examples during eval tokenization", _skipped_count)
 
-    print(f"After filtering: Train={len(train_ds)}, Eval={len(eval_ds)}")
+    log.info("After filtering: Train=%d, Eval=%d", len(train_ds), len(eval_ds))
 
     # ── Model ──
     model = AutoModelForCausalLM.from_pretrained(
@@ -175,13 +188,13 @@ def main():
     tokenizer.save_pretrained(cfg.sft.output_dir)
 
     if cfg.merge.enabled:
-        print("Merging LoRA weights...")
+        log.info("Merging LoRA weights...")
         merged = trainer.model.merge_and_unload()
         merged.save_pretrained(cfg.merge.output_dir)
         tokenizer.save_pretrained(cfg.merge.output_dir)
-        print(f"Merged model saved to {cfg.merge.output_dir}")
+        log.info("Merged model saved to %s", cfg.merge.output_dir)
 
-    print("Done.")
+    log.info("Done.")
 
 
 if __name__ == "__main__":

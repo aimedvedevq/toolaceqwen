@@ -1,8 +1,6 @@
 # === Model ===
 model:
-  name: Qwen/Qwen3-8B
-  # after SFT, point to merged model:
-  # name: ./output/merged
+  name: ./output/merged
   max_seq_length: 4096
   load_in_4bit: false
   lora_rank: 64
@@ -50,7 +48,6 @@ grpo:
   gradient_checkpointing: true
   seed: 42
 
-  # --- GRPO specific ---
   num_generations: 8
   max_completion_length: 512
   max_prompt_length: 3584
@@ -58,11 +55,11 @@ grpo:
   top_p: 0.95
   min_p: 0.05
   beta: 0.04
+  max_steps: 400
   loss_type: dapo
   scale_rewards: group
   log_completions: true
 
-# === Merge & Save ===
 merge:
   enabled: true
   output_dir: ./output_grpo/merged
