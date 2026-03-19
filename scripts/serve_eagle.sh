@@ -1,13 +1,17 @@
 #!/bin/bash
-# Deploy model with EAGLE-3 speculative decoding via vLLM
+# Production serving with EAGLE-3 speculative decoding via vLLM
 #
-# This uses the fine-tuned EAGLE-3 draft head trained on ToolACE data,
-# starting from the official RedHatAI/Qwen3-8B-speculator.eagle3 checkpoint.
+# Uses the fine-tuned EAGLE-3 draft head for ~1.8x E2EL speedup.
+# EAGLE-3 is lossless: output identical to target model by construction.
 #
-# Gives ~1.8x E2EL speedup and ~1.7x throughput improvement at c=1.
+# Includes production optimizations:
+#   - Prefix caching
+#   - Chunked prefill
+#   - GPU memory utilization 0.92
+#   - Max 64 concurrent sequences
 #
 # Usage:
-#   bash scripts/serve_eagle.sh                     # default: BF16 + EAGLE3
+#   bash scripts/serve_eagle.sh                     # BF16 + EAGLE3
 #   bash scripts/serve_eagle.sh --quantization fp8  # FP8 + EAGLE3
 
 MODEL="${MODEL:-kenkaneki/Qwen3-8B-ToolACE}"
@@ -32,5 +36,9 @@ python -m vllm.entrypoints.openai.api_server \
   --max-model-len 4096 \
   --enable-auto-tool-choice \
   --tool-call-parser hermes \
+  --enable-prefix-caching \
+  --enable-chunked-prefill \
+  --gpu-memory-utilization 0.92 \
+  --max-num-seqs 64 \
   --speculative-config "$SPEC_CONFIG" \
   $EXTRA_ARGS

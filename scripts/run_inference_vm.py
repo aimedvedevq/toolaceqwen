@@ -69,6 +69,12 @@ def build_vllm_command(args: argparse.Namespace) -> list[str]:
         "--enable-auto-tool-choice",
         "--tool-call-parser",
         args.tool_call_parser,
+        "--enable-prefix-caching",
+        "--enable-chunked-prefill",
+        "--gpu-memory-utilization",
+        "0.92",
+        "--max-num-seqs",
+        "64",
     ] + extra_flags
 
     if args.enable_ngram_spec:
