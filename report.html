@@ -8603,7 +8603,32 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="4.-Latency-and-Throughput">4. Latency and Throughput<a class="anchor-link" href="#4.-Latency-and-Throughput">¶</a></h2>
+<h2 id="4.-Latency-and-Throughput">4. Latency and Throughput<a class="anchor-link" href="#4.-Latency-and-Throughput">¶</a></h2><p>All latency numbers measured with <strong><code>vllm bench serve</code></strong> (standard vLLM benchmarking tool).</p>
+<h3 id="Benchmark-datasets">Benchmark datasets<a class="anchor-link" href="#Benchmark-datasets">¶</a></h3><table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th style="text-align:center">Prompts</th>
+<th style="text-align:center">Avg output tokens</th>
+<th>Use case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bench_prompts.jsonl</code></td>
+<td style="text-align:center">20 (oversampled to 100)</td>
+<td style="text-align:center">~30</td>
+<td>Short tool-calling requests (weather, flights, math, etc.)</td>
+</tr>
+<tr>
+<td><code>bench_long_agent_smoke.jsonl</code></td>
+<td style="text-align:center">8</td>
+<td style="text-align:center">~256</td>
+<td>Long agent-style post-tool responses (fraud analysis, compliance memos, etc.)</td>
+</tr>
+</tbody>
+</table>
+<p>All numbers in the main latency charts below are from the <strong>short tool-calling dataset</strong> at 100 requests per concurrency level, with 5 warmup rounds. Tools are included in every request via <code>--extra-body</code>.</p>
 </div>
 </div>
 </div>
