@@ -36,6 +36,10 @@ report_executed.ipynb
 .DS_Store
 Thumbs.db
 
+# Generated benchmark prompts (auto-created by bench.py from ToolACE)
+bench_*.jsonl
+
 # Misc
 *.swp
 *~
+bench_toolace.jsonl

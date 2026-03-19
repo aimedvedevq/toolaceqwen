@@ -110,14 +110,8 @@ requirements.lock         Pinned dependency versions
 9. **W4A16 + ToolACE calibration** — Domain-matched calibration for better quantization
 10. **EAGLE-3 fine-tuned** — Official `RedHatAI/Qwen3-8B-speculator.eagle3` fine-tuned on ToolACE, deployed via vLLM native speculative-config. Gives **1.8x E2EL speedup** at c=1.
 
-## Known Limitations
 
-- No ablation study (LoRA rank, SFT-only vs GRPO-only)
-- FP8/W4A16 evaluated only on `simple_python`, not full BFCL categories
-- SGLang showed worse performance than vLLM on this workload
-- EAGLE3 TTFT is slightly higher than BF16 baseline due to draft overhead
 
 ## Hardware
 
 - NVIDIA H100 80GB HBM3
-- Training: ~27 min SFT + ~20 min GRPO ≈ 47 min total
