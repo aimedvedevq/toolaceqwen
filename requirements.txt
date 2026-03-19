@@ -1,12 +1,12 @@
 # Core ML
-torch>=2.10.0
-transformers>=4.57.0
-datasets>=4.0.0
-accelerate>=1.0.0
-peft>=0.18.0
-trl>=0.24.0
-bitsandbytes>=0.49.0
-omegaconf>=2.3.0
+torch==2.10.0
+transformers==4.57.1
+datasets==4.3.0
+accelerate==1.12.0
+peft==0.18.1
+trl==0.24.0
+bitsandbytes==0.49.2
+omegaconf==2.3.0
 pyyaml
 numpy
 safetensors
@@ -14,14 +14,17 @@ huggingface-hub
 sentencepiece
 
 # Inference
-vllm>=0.17.0
+vllm==0.17.1
 aiohttp
 
 # Quantization
-llmcompressor>=0.10.0
+llmcompressor==0.10.0.1
 
 # GRPO
-unsloth
+unsloth==2026.3.4
+
+# EAGLE-3 speculative decoding
+speculators==0.4.0
 
 # Visualization
 matplotlib
@@ -34,5 +37,5 @@ tensorboard
 # BFCL Evaluation (install from source):
 #   cd ~/gorilla/berkeley-function-call-leaderboard && pip install -e .
 
-# For exact reproducibility, pin all versions:
-#   pip freeze > requirements.lock
+# For exact reproducibility use the lockfile:
+#   pip install -r requirements.lock

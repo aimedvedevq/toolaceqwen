@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-Inference benchmark using vllm bench serve (standard vLLM benchmarking tool).
+Reproducible inference benchmark using vllm bench serve.
 
-Measures TTFT, TPOT, ITL, E2EL with full percentile distributions
-at each concurrency level. Uses tool-calling requests via --extra-body.
+Generates prompts from the ToolACE held-out split (same data the model was
+designed for), then benchmarks each serving configuration across concurrency
+levels. All results are saved as JSON for the report notebook.
+
+Configurations benchmarked:
+    BF16, FP8 dynamic, W4A16, EAGLE3 fine-tuned
 
 Usage:
-    # Benchmark a running server:
-    python scripts/bench.py --port 8100
-
-    # Specific concurrency levels:
-    python scripts/bench.py --port 8100 --concurrency 1,16,32
-
-    # Full suite — starts/stops vLLM for BF16, FP8, W4A16:
-    python scripts/bench.py --suite
+    python scripts/bench.py --suite                    # full matrix (recommended)
+    python scripts/bench.py --suite --concurrency 1,16,32  # fewer levels
+    python scripts/bench.py --port 8100                # benchmark running server
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -24,89 +25,122 @@ import sys
 import tempfile
 import time
 import urllib.request
+from pathlib import Path
 
-PROMPTS = [
-    "What's the weather like in Tokyo right now?",
-    "Find me Italian restaurants in San Francisco",
-    "Calculate the compound interest on $10000 at 5% for 3 years",
-    "Book a flight from NYC to London on March 25th for 2 passengers",
-    "Translate 'Hello, how are you?' to Spanish",
-    "What's the weather in Paris in celsius?",
-    "Find cheap Mexican food near downtown LA",
-    "What is 15% of 847.50?",
-    "I need a flight from Tokyo to Seoul on April 1st",
-    "Translate 'Good morning' to French",
-    "Weather forecast for Berlin?",
-    "Any good sushi places in Manhattan?",
-    "Calculate sqrt(144) + 3^4",
-    "Book flight San Francisco to Chicago, May 10, 1 passenger",
-    "Translate 'Thank you very much' to Japanese",
-    "What's the temperature in Sydney?",
-    "Find Thai restaurants in Seattle, mid-range price",
-    "What is 2^10 * 3?",
-    "Flight from Boston to Miami, June 15, 3 passengers",
-    "Translate 'Where is the train station?' to German",
-]
-
-TOOLS = [
-    {"type": "function", "function": {
-        "name": "get_weather", "description": "Get current weather for a city",
-        "parameters": {"type": "object", "properties": {
-            "city": {"type": "string", "description": "City name"},
-            "units": {"type": "string", "enum": ["celsius", "fahrenheit"]}
-        }, "required": ["city"]}}},
-    {"type": "function", "function": {
-        "name": "search_restaurants", "description": "Search for restaurants",
-        "parameters": {"type": "object", "properties": {
-            "cuisine": {"type": "string"}, "location": {"type": "string"},
-            "price_range": {"type": "string"}
-        }, "required": ["cuisine", "location"]}}},
-    {"type": "function", "function": {
-        "name": "calculate", "description": "Evaluate a math expression",
-        "parameters": {"type": "object", "properties": {
-            "expression": {"type": "string"}
-        }, "required": ["expression"]}}},
-    {"type": "function", "function": {
-        "name": "book_flight", "description": "Book a flight",
-        "parameters": {"type": "object", "properties": {
-            "origin": {"type": "string"}, "destination": {"type": "string"},
-            "date": {"type": "string"}, "passengers": {"type": "integer"}
-        }, "required": ["origin", "destination", "date"]}}},
-    {"type": "function", "function": {
-        "name": "translate_text", "description": "Translate text to another language",
-        "parameters": {"type": "object", "properties": {
-            "text": {"type": "string"}, "target_language": {"type": "string"}
-        }, "required": ["text", "target_language"]}}},
-]
+SEED = 42
+PORT = 8200
+MODEL_PATH = "./output_grpo/merged"
 
 SUITE_CONFIGS = [
-    ("BF16",         "./output_grpo/merged", []),
-    ("FP8_dynamic",  "./output_grpo/merged", ["--quantization", "fp8"]),
-    ("W4A16",        "./output_grpo/w4a16",  ["--quantization", "compressed-tensors"]),
+    ("bf16",      MODEL_PATH, []),
+    ("fp8",       MODEL_PATH, ["--quantization", "fp8"]),
+    ("w4a16",     "./output_grpo/w4a16", ["--quantization", "compressed-tensors"]),
+    ("eagle3ft",  MODEL_PATH, [
+        "--speculative-config",
+        json.dumps({
+            "model": "./output_eagle_ft/checkpoints/0",
+            "num_speculative_tokens": 3,
+            "method": "eagle3",
+        }),
+    ]),
 ]
 
+TOOLS_JSON = json.dumps({
+    "tools": [
+        {"type": "function", "function": {
+            "name": "get_weather", "description": "Get weather",
+            "parameters": {"type": "object", "properties": {
+                "city": {"type": "string"}}, "required": ["city"]}}},
+        {"type": "function", "function": {
+            "name": "search_restaurants", "description": "Search restaurants",
+            "parameters": {"type": "object", "properties": {
+                "cuisine": {"type": "string"}, "location": {"type": "string"}},
+                "required": ["cuisine", "location"]}}},
+        {"type": "function", "function": {
+            "name": "calculate", "description": "Calculate math expression",
+            "parameters": {"type": "object", "properties": {
+                "expression": {"type": "string"}}, "required": ["expression"]}}},
+        {"type": "function", "function": {
+            "name": "book_flight", "description": "Book a flight",
+            "parameters": {"type": "object", "properties": {
+                "origin": {"type": "string"}, "destination": {"type": "string"},
+                "date": {"type": "string"}}, "required": ["origin", "destination", "date"]}}},
+        {"type": "function", "function": {
+            "name": "translate_text", "description": "Translate text",
+            "parameters": {"type": "object", "properties": {
+                "text": {"type": "string"}, "target_language": {"type": "string"}},
+                "required": ["text", "target_language"]}}},
+    ],
+    "tool_choice": "auto",
+    "chat_template_kwargs": {"enable_thinking": False},
+})
 
-def make_prompts_file():
-    """Write benchmark prompts to a temporary JSONL file."""
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
-    for p in PROMPTS:
-        f.write(json.dumps({"prompt": p}) + "\n")
-    f.close()
-    return f.name
+
+def prepare_toolace_prompts(path: str, max_prompts: int = 100) -> str:
+    """Build benchmark prompts from ToolACE held-out split."""
+    grpo_data = Path("./output/grpo_data")
+    if grpo_data.exists():
+        from datasets import load_from_disk
+        ds = load_from_disk(str(grpo_data))
+    else:
+        from datasets import load_dataset
+        ds = load_dataset("Team-ACE/ToolACE", split="train")
+        n = len(ds)
+        ds = ds.select(range(int(n * 0.7), n))
+
+    prompts = []
+    for ex in ds:
+        convs = ex.get("conversations", [])
+        user_msgs = [t["value"] for t in convs if t.get("from") == "user"]
+        if user_msgs:
+            prompts.append({"prompt": user_msgs[0]})
+            if len(prompts) >= max_prompts:
+                break
+
+    with open(path, "w") as f:
+        for p in prompts:
+            f.write(json.dumps(p) + "\n")
+
+    print(f"Prepared {len(prompts)} ToolACE prompts → {path}")
+    return path
 
 
-def run_vllm_bench(port, concurrency, num_prompts, result_dir, label,
-                   prompts_path, model=None):
-    """Run vllm bench serve for one concurrency level."""
-    extra = json.dumps({
-        "tools": TOOLS,
-        "tool_choice": "auto",
-        "chat_template_kwargs": {"enable_thinking": False},
-    })
+def wait_server(port: int, timeout: int = 300) -> str | None:
+    for _ in range(timeout // 3):
+        time.sleep(3)
+        try:
+            r = urllib.request.urlopen(f"http://localhost:{port}/v1/models")
+            return json.loads(r.read())["data"][0]["id"]
+        except Exception:
+            pass
+    return None
 
+
+def kill_port(port: int) -> None:
+    os.system(f"fuser -k {port}/tcp 2>/dev/null")
+    os.system("pkill -9 -f 'vllm.entrypoints' 2>/dev/null")
+    os.system("pkill -9 -f 'VLLM::EngineCore' 2>/dev/null")
+    time.sleep(8)
+    for _ in range(10):
+        try:
+            r = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0 and int(r.stdout.strip().split("\n")[0]) < 1000:
+                return
+        except Exception:
+            pass
+        time.sleep(3)
+
+
+def run_vllm_bench(
+    port: int, concurrency: int, num_prompts: int,
+    result_dir: str, label: str, prompts_path: str,
+) -> dict | None:
     result_file = f"{label}_c{concurrency}.json"
     cmd = [
-        sys.executable, "-m", "vllm", "bench", "serve",
+        "vllm", "bench", "serve",
         "--backend", "openai-chat",
         "--port", str(port),
         "--endpoint", "/v1/chat/completions",
@@ -115,7 +149,8 @@ def run_vllm_bench(port, concurrency, num_prompts, result_dir, label,
         "--num-prompts", str(num_prompts),
         "--max-concurrency", str(concurrency),
         "--request-rate", "inf",
-        "--extra-body", extra,
+        "--extra-body", TOOLS_JSON,
+        "--temperature", "0",
         "--percentile-metrics", "ttft,tpot,itl,e2el",
         "--metric-percentiles", "25,50,75,90,95,99",
         "--custom-output-len", "256",
@@ -124,77 +159,33 @@ def run_vllm_bench(port, concurrency, num_prompts, result_dir, label,
         "--result-filename", result_file,
         "--label", f"{label}_c{concurrency}",
         "--num-warmups", "5",
-        "--seed", "42",
+        "--seed", str(SEED),
     ]
-    if model:
-        cmd += ["--model", model]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
 
-    output = result.stdout + result.stderr
-    for line in output.splitlines():
-        if any(k in line.lower() for k in ["throughput", "ttft", "tpot", "e2el"]):
+    for line in (result.stdout + result.stderr).splitlines():
+        if any(k in line.lower() for k in ["median e2el", "output token", "median ttft"]):
             print(f"    {line.strip()}")
 
     if result.returncode != 0:
-        err = result.stderr[-300:] if result.stderr else "unknown error"
-        print(f"    FAILED: {err}")
+        print(f"    FAILED: {result.stderr[-200:]}")
         return None
 
-    result_path = os.path.join(result_dir, result_file)
-    if os.path.exists(result_path):
-        with open(result_path) as f:
+    rp = os.path.join(result_dir, result_file)
+    if os.path.exists(rp):
+        with open(rp) as f:
             return json.load(f)
     return None
 
 
-def wait_server(port, timeout=240):
-    for _ in range(timeout // 3):
-        time.sleep(3)
-        try:
-            r = urllib.request.urlopen(f"http://localhost:{port}/v1/models")
-            data = json.loads(r.read())
-            return data["data"][0]["id"]
-        except Exception:
-            pass
-    return None
-
-
-def kill_port(port):
-    os.system(f"fuser -k {port}/tcp 2>/dev/null")
-    os.system("pkill -9 -f 'vllm.entrypoints' 2>/dev/null")
-    os.system("pkill -9 -f 'vllm' 2>/dev/null")
-    time.sleep(5)
-    for _ in range(10):
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            mem = int(result.stdout.strip().split("\n")[0])
-            if mem < 1000:
-                return
-        time.sleep(3)
-    print("  WARNING: GPU memory not fully freed")
-
-
-def bench_config(port, label, concurrency_levels, num_prompts, result_dir,
-                 prompts_path, model=None):
-    """Benchmark one model config across all concurrency levels."""
-    results = {}
-    for c in concurrency_levels:
-        print(f"  c={c:>2d} ({num_prompts} prompts)...")
-        data = run_vllm_bench(
-            port, c, num_prompts, result_dir, label, prompts_path, model,
-        )
-        results[c] = data
-    return results
-
-
-def run_suite(concurrency_levels, num_prompts, result_dir, port=8100):
-    """Start/stop vLLM servers for each config and benchmark."""
-    prompts_path = make_prompts_file()
+def run_suite(
+    concurrency_levels: list[int],
+    num_prompts: int,
+    result_dir: str,
+    prompts_path: str,
+    port: int,
+) -> dict:
     all_results = {}
 
     for label, model_path, extra_args in SUITE_CONFIGS:
@@ -224,15 +215,18 @@ def run_suite(concurrency_levels, num_prompts, result_dir, port=8100):
         if not model_name:
             print(f"  FAILED to start server")
             proc.kill()
-            all_results[label] = {"error": "server failed to start"}
+            all_results[label] = {"error": "server failed"}
             continue
 
         print(f"  Server ready: {model_name}")
-        all_results[label] = bench_config(
-            port, label, concurrency_levels, num_prompts,
-            result_dir, prompts_path, model_name,
-        )
+        cfg_results = {}
+        for c in concurrency_levels:
+            print(f"  c={c:>2d}...")
+            data = run_vllm_bench(port, c, num_prompts, result_dir, label, prompts_path)
+            if data:
+                cfg_results[c] = data
 
+        all_results[label] = cfg_results
         proc.terminate()
         try:
             proc.wait(timeout=10)
@@ -240,54 +234,77 @@ def run_suite(concurrency_levels, num_prompts, result_dir, port=8100):
             proc.kill()
         kill_port(port)
 
-    os.unlink(prompts_path)
     return all_results
 
 
-def run_single(port, concurrency_levels, num_prompts, result_dir):
-    """Benchmark an already-running server."""
-    models_url = f"http://localhost:{port}/v1/models"
-    data = json.loads(urllib.request.urlopen(models_url).read())
+def run_single(port: int, concurrency_levels: list[int], num_prompts: int,
+               result_dir: str, prompts_path: str) -> dict:
+    data = json.loads(urllib.request.urlopen(
+        f"http://localhost:{port}/v1/models"
+    ).read())
     model_name = data["data"][0]["id"]
     print(f"Model: {model_name}")
 
-    prompts_path = make_prompts_file()
-    label = model_name.replace("/", "_")
-    results = bench_config(
-        port, label, concurrency_levels, num_prompts,
-        result_dir, prompts_path, model_name,
-    )
-    os.unlink(prompts_path)
+    label = model_name.replace("/", "_").replace(".", "_")
+    results = {}
+    for c in concurrency_levels:
+        print(f"  c={c:>2d}...")
+        d = run_vllm_bench(port, c, num_prompts, result_dir, label, prompts_path)
+        if d:
+            results[c] = d
     return {label: results}
 
 
-def main():
+def print_summary(all_results: dict) -> None:
+    print(f"\n{'='*80}")
+    print(f"{'Config':<15s} {'c':>3s} {'TTFT p50':>10s} {'E2EL p50':>10s} {'tok/s':>8s}")
+    print(f"{'-'*80}")
+    for label, data in all_results.items():
+        if isinstance(data, dict) and "error" in data:
+            print(f"  {label:<13s} FAILED: {data['error']}")
+            continue
+        for c in sorted(k for k in data if isinstance(k, int)):
+            d = data[c]
+            ttft = d.get("median_ttft_ms", d.get("p50_ttft_ms", 0))
+            e2el = d.get("median_e2el_ms", d.get("p50_e2el_ms", 0))
+            tps = d.get("output_throughput", 0)
+            print(f"  {label:<13s} {c:>3d} {ttft:>9.1f}ms {e2el:>9.1f}ms {tps:>7.1f}")
+    print(f"{'='*80}")
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Inference benchmark using vllm bench serve",
+        description="Reproducible inference benchmark on ToolACE prompts",
     )
-    parser.add_argument("--port", type=int, default=8100)
+    parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--suite", action="store_true",
-                        help="Full suite: BF16/FP8/W4A16 with server management")
+                        help="Run full suite: BF16/FP8/W4A16/EAGLE3")
     parser.add_argument("--concurrency", default="1,4,8,16,32")
     parser.add_argument("--num-prompts", type=int, default=100)
     parser.add_argument("--result-dir", default="results/bench")
+    parser.add_argument("--prompts", default="bench_toolace.jsonl",
+                        help="Prompts JSONL (auto-generated from ToolACE if missing)")
     args = parser.parse_args()
 
     levels = [int(c) for c in args.concurrency.split(",")]
     os.makedirs(args.result_dir, exist_ok=True)
 
+    if not os.path.exists(args.prompts):
+        prepare_toolace_prompts(args.prompts, args.num_prompts)
+
     if args.suite:
-        results = run_suite(levels, args.num_prompts, args.result_dir, args.port)
+        results = run_suite(levels, args.num_prompts, args.result_dir,
+                            args.prompts, args.port)
     else:
-        results = run_single(
-            args.port, levels, args.num_prompts, args.result_dir,
-        )
+        results = run_single(args.port, levels, args.num_prompts,
+                             args.result_dir, args.prompts)
+
+    print_summary(results)
 
     summary_path = os.path.join(args.result_dir, "summary.json")
     with open(summary_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
-    print(f"\nResults saved to {args.result_dir}/")
-    print(f"Summary: {summary_path}")
+    print(f"\nSaved to {args.result_dir}/")
 
 
 if __name__ == "__main__":

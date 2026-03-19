@@ -35,22 +35,22 @@ ToolACE (11,300 samples) → 70/30 split
 | + SFT | 83.05% |
 | + GRPO | 82.86% |
 
-### Inference Latency (H100, vLLM, `vllm bench serve`, 100 requests)
+### Inference Latency (H100, vLLM, `vllm bench serve`, ToolACE prompts, 100 requests)
 
 | Config | c | TTFT p50 | E2EL p50 | Output tok/s |
 |--------|:-:|:--------:|:--------:|:------------:|
-| BF16 | 1 | 14.6 ms | 197.8 ms | 146.7 |
-| FP8 dynamic | 1 | 11.7 ms | 139.5 ms | 211.9 |
-| W4A16 | 1 | 12.2 ms | 142.8 ms | 203.0 |
-| **EAGLE3 FT** | **1** | **18.8 ms** | **111.8 ms** | **268.8** |
-| BF16 | 16 | 29.6 ms | 233.0 ms | 1861.1 |
-| FP8 dynamic | 16 | 26.1 ms | 177.4 ms | 2474.0 |
-| W4A16 | 16 | 27.7 ms | 185.0 ms | 2384.1 |
-| **EAGLE3 FT** | **16** | **36.9 ms** | **170.4 ms** | **2577.8** |
-| BF16 | 32 | 33.6 ms | 271.8 ms | 2933.4 |
+| BF16 | 1 | 15.5 ms | 323.9 ms | 150.4 |
+| FP8 dynamic | 1 | 13.2 ms | 222.9 ms | 217.7 |
+| W4A16 | 1 | 13.7 ms | 222.3 ms | 208.9 |
+| **EAGLE3 FT** | **1** | **18.7 ms** | **175.4 ms** | **271.3** |
+| BF16 | 16 | 29.4 ms | 375.6 ms | 1623.0 |
+| FP8 dynamic | 16 | 24.1 ms | 284.4 ms | 2207.6 |
+| W4A16 | 16 | 19.8 ms | 239.1 ms | 2235.1 |
+| **EAGLE3 FT** | **16** | **30.5 ms** | **204.4 ms** | **3280.0** |
+| BF16 | 32 | 33.9 ms | 447.5 ms | 2293.1 |
 | FP8 dynamic | 32 | 33.0 ms | 247.3 ms | 3268.1 |
-| W4A16 | 32 | 29.8 ms | 237.1 ms | 3362.0 |
-| **EAGLE3 FT** | **32** | **56.2 ms** | **202.1 ms** | **4061.1** |
+| W4A16 | 32 | 23.8 ms | 276.5 ms | 3096.7 |
+| **EAGLE3 FT** | **32** | **40.7 ms** | **232.7 ms** | **4378.3** |
 
 ## Quick Start
 

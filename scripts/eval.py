@@ -10,8 +10,7 @@ Usage:
     python scripts/eval.py --configs baseline sft grpo     # multiple
     python scripts/eval.py --all                           # all configs
     python scripts/eval.py --all --test-category simple_python  # Python subset only
-    python scripts/eval.py --configs eagle3                        # EAGLE3 speculative decoding
-    python scripts/eval.py --configs eagle3 --test-category simple_python
+    # NOTE: EAGLE3 is lossless — same accuracy as BF16, use bench.py for latency
 """
 
 import argparse
@@ -57,15 +56,9 @@ ALL_CONFIGS = {
         "vllm_args": ["--quantization", "compressed-tensors"],
         "label": "Post-GRPO (W4A16)",
     },
-    "eagle3": {
-        "model_name": "Qwen/Qwen3-8B",
-        "local_model_path": "./output_grpo/merged",
-        "vllm_args": [
-            "--speculative-config",
-            '{"model":"./output_eagle_ft/checkpoints/0","num_speculative_tokens":3,"method":"eagle3"}',
-        ],
-        "label": "Post-GRPO + EAGLE3 FT",
-    },
+    # NOTE: EAGLE3 is lossless speculative decoding — output is identical to
+    # the target model by construction. No separate BFCL eval needed.
+    # Use scripts/bench.py to measure its latency advantage instead.
 }
 
 
