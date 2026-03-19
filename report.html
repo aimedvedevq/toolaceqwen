@@ -8044,7 +8044,18 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="SFT-Loss">SFT Loss<a class="anchor-link" href="#SFT-Loss">¶</a></h3><p>470 training steps, real loss from <code>logs/run_exp2.log</code>. Raw curve shown in light, EMA-smoothed in bold.</p>
+<h2 id="2.-Training">2. Training<a class="anchor-link" href="#2.-Training">¶</a></h2><h3 id="Model-choice">Model choice<a class="anchor-link" href="#Model-choice">¶</a></h3><p><strong>Qwen3-8B</strong> — native tool calling support, 8B parameters fit H100 with full KV cache headroom, strong BFCL baseline (95% on simple_python out of the box). The <code>nothink</code> mode disables chain-of-thought, producing deterministic low-latency tool calls.</p>
+<h3 id="Stage-1-%E2%80%94-SFT-(27-min)">Stage 1 — SFT (27 min)<a class="anchor-link" href="#Stage-1-%E2%80%94-SFT-(27-min)">¶</a></h3><p>LoRA r=64 on all linear layers with <strong>assistant-only loss masking</strong>: the model only learns to produce tool calls, not to repeat system prompts or user messages. 1 epoch on 70% of ToolACE (~7900 samples). Loss drops from 1.45 to 0.34.</p>
+<h3 id="Stage-2-%E2%80%94-GRPO-(20-min)">Stage 2 — GRPO (20 min)<a class="anchor-link" href="#Stage-2-%E2%80%94-GRPO-(20-min)">¶</a></h3><p>Group Relative Policy Optimization with <strong>decomposed rewards</strong>. Three components score each generation independently:</p>
+<ul>
+<li><strong>Format</strong> (weight 0.1, decays over training): Is the output valid <code>&lt;tool_call&gt;</code> JSON?</li>
+<li><strong>Tool name</strong> (weight 0.5): Did the model call the right function?</li>
+<li><strong>Tool args</strong> (weight 0.4): Are the argument names and values correct?</li>
+</ul>
+<p>DAPO loss variant removes KL penalty for more aggressive exploration. 400 steps on 30% of ToolACE.</p>
+<h3 id="Stage-3-%E2%80%94-EAGLE-3-Fine-tune-(12-min)">Stage 3 — EAGLE-3 Fine-tune (12 min)<a class="anchor-link" href="#Stage-3-%E2%80%94-EAGLE-3-Fine-tune-(12-min)">¶</a></h3><p>Speculative decoding requires a <strong>draft model</strong> that predicts what the target model will generate. We fine-tuned the official <a href="https://huggingface.co/RedHatAI/Qwen3-8B-speculator.eagle3">RedHatAI/Qwen3-8B-speculator.eagle3</a> on ToolACE hidden states for 1 epoch.</p>
+<p><strong>Why not train from scratch?</strong> Our first attempt trained the draft on ToolACE-only data — it learned JSON token patterns but failed on natural language, giving a validation accuracy of just 0.62/0.39/0.24 (tokens 0/1/2). The official checkpoint already handles general text well; fine-tuning adapts it to our tool-calling distribution while preserving that capability → <strong>0.82/0.64/0.49</strong>.</p>
+<p>Total training time: <strong>~62 minutes</strong> (SFT 27 + GRPO 20 + EAGLE 12 + overhead 3).</p>
 </div>
 </div>
 </div>
