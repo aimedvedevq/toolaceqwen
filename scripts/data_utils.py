@@ -1,5 +1,3 @@
-"""Convert ToolACE dataset to Qwen3 native tool calling format."""
-
 import ast
 import json
 import re

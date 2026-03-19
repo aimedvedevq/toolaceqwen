@@ -30,12 +30,10 @@ from pathlib import Path
 SEED = 42
 PORT = 8200
 
-# Models: use local paths if available, else HuggingFace
 MODEL_PATH = os.environ.get("MODEL_PATH", "./output_grpo/merged")
 W4A16_PATH = os.environ.get("W4A16_PATH", "./output_grpo/w4a16")
 EAGLE_CKPT = os.environ.get("EAGLE_CKPT", "./output_eagle_ft/checkpoints/0")
 
-# HuggingFace fallbacks
 HF_MODEL = "kenkaneki/Qwen3-8B-ToolACE"
 HF_W4A16 = "kenkaneki/Qwen3-8B-ToolACE-W4A16"
 HF_EAGLE = "kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3"
