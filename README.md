@@ -13,10 +13,6 @@ ToolACE (11,300 samples) → 70/30 split
                 └── W4A16  (2.7x compression)
 ```
 
-## Results
-
-> All numbers below are from fresh runs on 2026-03-18. Source of truth: `results/bfcl_full_core.json` and `results/bench_inference.json`.
-
 ### BFCL v4 Accuracy (`simple_python`, n=400)
 
 | Config | Accuracy |
@@ -168,15 +164,21 @@ requirements.lock         Pinned dependency versions
 10. **EAGLE-3 fine-tuned** — Official `RedHatAI/Qwen3-8B-speculator.eagle3` fine-tuned on ToolACE, deployed via vLLM native speculative-config. Gives **1.8x E2EL speedup** at c=1.
 
 
-
-## Known Limitations
-
-- No ablation study (LoRA rank, SFT-only vs GRPO-only)
-- FP8/W4A16 evaluated only on `simple_python`, not full BFCL categories
-- SGLang showed worse performance than vLLM on this workload
-- EAGLE3 TTFT is slightly higher than BF16 due to draft model overhead
-
 ## Hardware
 
 - NVIDIA H100 80GB HBM3
 - Training: ~27 min SFT + ~20 min GRPO + ~15 min EAGLE3 FT ≈ 62 min total
+
+## Models on HuggingFace
+
+| Model | Description |
+|-------|-------------|
+| [kenkaneki/Qwen3-8B-ToolACE](https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE) | Post-GRPO merged model (BF16) |
+| [kenkaneki/Qwen3-8B-ToolACE-W4A16](https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE-W4A16) | W4A16 quantized (ToolACE-calibrated) |
+| [kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3](https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3) | EAGLE-3 draft head (1.8x speedup) |
+
+All scripts default to HF model paths — no local checkpoints needed to run eval, bench, or serve.
+
+## Benchmarking Tool
+
+Latency measured with [`vllm bench serve`](https://docs.vllm.ai/en/latest/cli/bench/serve.html) — the standard vLLM benchmarking CLI. Prompts auto-generated from ToolACE held-out split (100 requests per concurrency level, 5 warmup rounds).

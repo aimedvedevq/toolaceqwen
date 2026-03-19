@@ -25,6 +25,9 @@ BFCL_ROOT = os.path.expanduser("~/gorilla/berkeley-function-call-leaderboard")
 PORT = 8100
 PYTHON = sys.executable
 
+HF_MODEL = os.environ.get("HF_MODEL", "kenkaneki/Qwen3-8B-ToolACE")
+LOCAL_MODEL = os.environ.get("LOCAL_MODEL", "./output_grpo/merged")
+
 ALL_CONFIGS = {
     "baseline": {
         "model_name": "Qwen/Qwen3-8B",
@@ -40,19 +43,19 @@ ALL_CONFIGS = {
     },
     "grpo": {
         "model_name": "Qwen/Qwen3-8B",
-        "local_model_path": "./output_grpo/merged",
+        "local_model_path": LOCAL_MODEL,
         "vllm_args": [],
         "label": "Post-GRPO (BF16)",
     },
     "fp8": {
         "model_name": "Qwen/Qwen3-8B",
-        "local_model_path": "./output_grpo/merged",
+        "local_model_path": LOCAL_MODEL,
         "vllm_args": ["--quantization", "fp8"],
         "label": "Post-GRPO (FP8)",
     },
     "w4a16": {
         "model_name": "Qwen/Qwen3-8B",
-        "local_model_path": "./output_grpo/w4a16",
+        "local_model_path": os.environ.get("W4A16_MODEL", "./output_grpo/w4a16"),
         "vllm_args": ["--quantization", "compressed-tensors"],
         "label": "Post-GRPO (W4A16)",
     },

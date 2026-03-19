@@ -29,16 +29,30 @@ from pathlib import Path
 
 SEED = 42
 PORT = 8200
-MODEL_PATH = "./output_grpo/merged"
+
+# Models: use local paths if available, else HuggingFace
+MODEL_PATH = os.environ.get("MODEL_PATH", "./output_grpo/merged")
+W4A16_PATH = os.environ.get("W4A16_PATH", "./output_grpo/w4a16")
+EAGLE_CKPT = os.environ.get("EAGLE_CKPT", "./output_eagle_ft/checkpoints/0")
+
+# HuggingFace fallbacks
+HF_MODEL = "kenkaneki/Qwen3-8B-ToolACE"
+HF_W4A16 = "kenkaneki/Qwen3-8B-ToolACE-W4A16"
+HF_EAGLE = "kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3"
+
+
+def resolve(local: str, hf: str) -> str:
+    return local if os.path.exists(local) else hf
+
 
 SUITE_CONFIGS = [
-    ("bf16",      MODEL_PATH, []),
-    ("fp8",       MODEL_PATH, ["--quantization", "fp8"]),
-    ("w4a16",     "./output_grpo/w4a16", ["--quantization", "compressed-tensors"]),
-    ("eagle3ft",  MODEL_PATH, [
+    ("bf16",      lambda: resolve(MODEL_PATH, HF_MODEL), []),
+    ("fp8",       lambda: resolve(MODEL_PATH, HF_MODEL), ["--quantization", "fp8"]),
+    ("w4a16",     lambda: resolve(W4A16_PATH, HF_W4A16), ["--quantization", "compressed-tensors"]),
+    ("eagle3ft",  lambda: resolve(MODEL_PATH, HF_MODEL), [
         "--speculative-config",
         json.dumps({
-            "model": "./output_eagle_ft/checkpoints/0",
+            "model": resolve(EAGLE_CKPT, HF_EAGLE),
             "num_speculative_tokens": 3,
             "method": "eagle3",
         }),
@@ -188,8 +202,9 @@ def run_suite(
 ) -> dict:
     all_results = {}
 
-    for label, model_path, extra_args in SUITE_CONFIGS:
-        if not os.path.exists(model_path):
+    for label, model_fn, extra_args in SUITE_CONFIGS:
+        model_path = model_fn() if callable(model_fn) else model_fn
+        if not os.path.exists(model_path) and not model_path.startswith("kenkaneki/"):
             print(f"\n  Skipping {label}: {model_path} not found")
             continue
 

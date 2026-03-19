@@ -11,7 +11,7 @@
 #   MODEL=./output_grpo/w4a16 bash scripts/serve.sh --quantization compressed-tensors  # W4A16
 #   MODEL=kenkaneki/Qwen3-8B-ToolACE bash scripts/serve.sh            # from HF Hub
 
-MODEL="${MODEL:-./output_grpo/merged}"
+MODEL="${MODEL:-kenkaneki/Qwen3-8B-ToolACE}"
 PORT="${PORT:-8100}"
 EXTRA_ARGS="$@"
 

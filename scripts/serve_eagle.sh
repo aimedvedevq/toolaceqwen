@@ -10,8 +10,8 @@
 #   bash scripts/serve_eagle.sh                     # default: BF16 + EAGLE3
 #   bash scripts/serve_eagle.sh --quantization fp8  # FP8 + EAGLE3
 
-MODEL="${MODEL:-./output_grpo/merged}"
-EAGLE_CKPT="${EAGLE_CKPT:-./output_eagle_ft/checkpoints/0}"
+MODEL="${MODEL:-kenkaneki/Qwen3-8B-ToolACE}"
+EAGLE_CKPT="${EAGLE_CKPT:-kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3}"
 PORT="${PORT:-8100}"
 EXTRA_ARGS="$@"
 

@@ -28,21 +28,23 @@ ROOT = Path(__file__).resolve().parents[1]
 MERGED_MODEL = ROOT / "output_grpo" / "merged"
 W4A16_MODEL = ROOT / "output_grpo" / "w4a16"
 
+HF_MODEL = "kenkaneki/Qwen3-8B-ToolACE"
+HF_W4A16 = "kenkaneki/Qwen3-8B-ToolACE-W4A16"
 
-def resolve_model_and_flags(engine: str, quantization: str) -> tuple[Path, list[str]]:
+
+def _resolve(local: Path, hf: str) -> str:
+    return str(local) if local.exists() else hf
+
+
+def resolve_model_and_flags(engine: str, quantization: str) -> tuple[str, list[str]]:
+    model = _resolve(MERGED_MODEL, HF_MODEL)
     if quantization == "bf16":
-        return MERGED_MODEL, []
+        return model, []
     if quantization == "fp8":
-        if engine == "vllm":
-            return MERGED_MODEL, ["--quantization", "fp8"]
-        if engine == "sglang":
-            return MERGED_MODEL, ["--quantization", "fp8"]
+        return model, ["--quantization", "fp8"]
     if quantization == "w4a16":
-        if engine == "vllm":
-            return W4A16_MODEL, ["--quantization", "compressed-tensors"]
-        if engine == "sglang":
-            return W4A16_MODEL, ["--quantization", "compressed-tensors"]
-    raise ValueError(f"Unsupported combination: engine={engine}, quantization={quantization}")
+        return _resolve(W4A16_MODEL, HF_W4A16), ["--quantization", "compressed-tensors"]
+    raise ValueError(f"Unsupported quantization: {quantization}")
 
 
 def build_vllm_command(args: argparse.Namespace) -> list[str]:
