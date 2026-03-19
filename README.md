@@ -52,19 +52,76 @@ ToolACE (11,300 samples) → 70/30 split
 | W4A16 | 32 | 23.8 ms | 276.5 ms | 3096.7 |
 | **EAGLE3 FT** | **32** | **40.7 ms** | **232.7 ms** | **4378.3** |
 
-## Quick Start
+## How to Reproduce
 
+### Setup
 ```bash
-pip install -r requirements.txt
-pip freeze > requirements.lock  # pin exact versions
+pip install -r requirements.txt            # or: pip install -r requirements.lock
 cd ~/gorilla/berkeley-function-call-leaderboard && pip install -e .
+```
 
-# Full pipeline
-make train      # SFT + GRPO
-make quantize   # FP8 + W4A16
-make eval       # BFCL all categories
-make bench      # Latency benchmarks
+### 1. Training (~47 min total)
+```bash
+python scripts/sft.py                       # SFT: 1 epoch LoRA on ToolACE (~27 min)
+python scripts/grpo.py                      # GRPO: 400 steps with decomposed rewards (~20 min)
+```
+
+### 2. Quantization (~5 min)
+```bash
+python scripts/quantize.py --model ./output_grpo/merged --method fp8 --output ./output_grpo/fp8
+python scripts/quantize.py --model ./output_grpo/merged --method w4a16 --output ./output_grpo/w4a16
+```
+
+### 3. EAGLE-3 Speculative Decoding (~15 min)
+```bash
+python scripts/finetune_eagle.py            # Fine-tune official draft on ToolACE
+```
+
+### 4. BFCL Evaluation
+```bash
+# Full evaluation (all 13 categories, ~30 min per config)
+python scripts/eval.py --all
+
+# Quick check (Python subset only, ~2 min per config)
+python scripts/eval.py --configs baseline sft grpo fp8 w4a16 --test-category simple_python
+```
+> EAGLE3 is lossless speculative decoding — accuracy is identical to BF16 by construction.
+
+### 5. Latency Benchmarks
+```bash
+# Full suite: BF16 / FP8 / W4A16 / EAGLE3 × concurrency 1,4,8,16,32
+python scripts/bench.py --suite
+
+# Quick check at production concurrency
+python scripts/bench.py --suite --concurrency 1,16,32
+
+# Benchmark a running server
+python scripts/bench.py --port 8100 --concurrency 1,16,32
+```
+
+### 6. Serving
+```bash
+# Recommended: FP8 dynamic (best quality/latency tradeoff)
+bash scripts/serve.sh --quantization fp8
+
+# Maximum performance: EAGLE3 speculative decoding
+bash scripts/serve_eagle.sh
+
+# BF16 baseline
+bash scripts/serve.sh
+
+# Python launcher with all options
+python scripts/run_inference_vm.py --quantization fp8
+```
+
+### 7. Report
+```bash
 make report     # Execute notebook + render HTML
+```
+
+### Shortcut (full pipeline via Make)
+```bash
+make train && make quantize && make eval && make bench && make report
 ```
 
 ## Repository Structure
@@ -112,6 +169,14 @@ requirements.lock         Pinned dependency versions
 
 
 
+## Known Limitations
+
+- No ablation study (LoRA rank, SFT-only vs GRPO-only)
+- FP8/W4A16 evaluated only on `simple_python`, not full BFCL categories
+- SGLang showed worse performance than vLLM on this workload
+- EAGLE3 TTFT is slightly higher than BF16 due to draft model overhead
+
 ## Hardware
 
 - NVIDIA H100 80GB HBM3
+- Training: ~27 min SFT + ~20 min GRPO + ~15 min EAGLE3 FT ≈ 62 min total
