@@ -22,8 +22,8 @@ ToolACE (11,300 samples) → 70/30 split
 | Config | Accuracy |
 |--------|:--------:|
 | Baseline Qwen3-8B | 95.00% |
-| + SFT | 96.00% |
-| + GRPO | 96.25% |
+| + SFT | 95.75% |
+| + GRPO | 96.5% |
 | FP8 dynamic | 96.50% |
 | W4A16 | 96.50% |
 
