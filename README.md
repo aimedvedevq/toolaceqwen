@@ -6,11 +6,15 @@ Fine-tuned Qwen3-8B for precise function calling, optimized for **accuracy → l
 
 ```
 ToolACE (11,300 samples) → 70/30 split
-    ├── SFT (1 epoch, LoRA r=64)     → format learning
-    └── GRPO (400 steps, DAPO loss)  → quality refinement via reward decomposition
-                ├── BF16   (baseline serving)
-                ├── FP8    (recommended: ~1.44x throughput, no quality loss)
-                └── W4A16  (2.7x compression)
+    ├── SFT (1 epoch, LoRA r=64)        → format learning
+    └── GRPO (400 steps, DAPO loss)     → quality refinement
+                │
+                ├── BF16                 (baseline)
+                ├── FP8 dynamic          (1.5x throughput, no quality loss)
+                ├── W4A16                (2.7x compression)
+                │
+                └── + EAGLE-3 FT         (1.8x E2EL speedup, lossless)
+                      fine-tuned from RedHatAI/Qwen3-8B-speculator.eagle3
 ```
 
 ### BFCL v4 Accuracy (`simple_python`, n=400)
