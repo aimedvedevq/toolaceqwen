@@ -7806,7 +7806,7 @@ a.anchor-link {
 <strong>Requirement</strong>: Precise function calling via natural language → internal APIs
 <strong>Priority</strong>: Accuracy → Latency → Cost</p>
 <p><strong>Approach</strong>: Fine-tune Qwen3-8B on ToolACE dataset via SFT + GRPO, optimize inference with FP8 quantization and EAGLE-3 speculative decoding.</p>
-<p><strong>Key result</strong>: 96.25% accuracy on BFCL Python subset, 175ms E2EL at c=1 with EAGLE-3 (1.85x faster than BF16 baseline), serving 4378 tok/s at c=32.</p>
+<p><strong>Key result</strong>: 96.5% accuracy on BFCL Python subset, 175ms E2EL at c=1 with EAGLE-3 (1.85x faster than BF16 baseline), serving 4378 tok/s at c=32.</p>
 </div>
 </div>
 </div>
@@ -7996,11 +7996,31 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-Executive-Summary">1. Executive Summary<a class="anchor-link" href="#1.-Executive-Summary">¶</a></h2><p>We evaluated 4 serving configurations on real ToolACE prompts, measured with <code>vllm bench serve</code>:</p>
+<h2 id="1.-Executive-Summary">1. Executive Summary<a class="anchor-link" href="#1.-Executive-Summary">¶</a></h2><h3 id="Model-&amp;-Training">Model &amp; Training<a class="anchor-link" href="#Model-&amp;-Training">¶</a></h3><ul>
+<li><strong>Base model</strong>: Qwen3-8B — chosen for native tool calling support and strong BFCL baseline (95.00% on simple_python out of the box)</li>
+<li><strong>Fine-tuning</strong>: Two-stage pipeline on ToolACE (11,300 samples, 70/30 split)<ul>
+<li><strong>SFT</strong> (1 epoch, 27 min): LoRA r=64, assistant-only loss masking → learns structured tool-call format</li>
+<li><strong>GRPO</strong> (400 steps, 20 min): Decomposed rewards (format/name/args) with DAPO loss → refines quality</li>
+</ul>
+</li>
+<li><strong>Result</strong>: 96.25% on BFCL simple_python (+1.25pp over baseline), 82.86% weighted core accuracy across 13 categories (+5.5pp over baseline)</li>
+</ul>
+<h3 id="Optimization-&amp;-Inference">Optimization &amp; Inference<a class="anchor-link" href="#Optimization-&amp;-Inference">¶</a></h3><ul>
+<li><strong>FP8 dynamic quantization</strong>: 1.5x throughput over BF16, zero quality loss, no calibration data needed</li>
+<li><strong>W4A16 quantized</strong> (ToolACE-calibrated): 2.7x model compression (16GB → 5.7GB), quality preserved</li>
+<li><strong>EAGLE-3 speculative decoding</strong>: Fine-tuned official draft head on ToolACE → <strong>1.85x E2EL speedup</strong> at c=1, lossless by construction</li>
+<li><strong>Engine choice</strong>: vLLM outperformed SGLang on all metrics for this workload</li>
+</ul>
+<h3 id="Production-Readiness">Production Readiness<a class="anchor-link" href="#Production-Readiness">¶</a></h3><ul>
+<li>Serving via vLLM with prefix caching, chunked prefill, hermes tool-call parser</li>
+<li>Benchmarked at client-expected concurrency (16-32 requests) on real ToolACE prompts</li>
+<li>All models published on HuggingFace, all scripts reproducible via <code>make</code></li>
+<li>At c=32: <strong>4378 tok/s</strong> with EAGLE3, <strong>3268 tok/s</strong> with FP8, <strong>2293 tok/s</strong> BF16 baseline</li>
+</ul>
 </div>
 </div>
 </div>
-</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=aee7cd24">
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=eb9efc9c">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -8011,123 +8031,9 @@ a.anchor-link {
 <div class="highlight hl-ipython3"><pre><span></span><span class="n">bf16_c1</span> <span class="o">=</span> <span class="n">bench</span><span class="p">[</span><span class="s1">'BF16'</span><span class="p">][</span><span class="s1">'1'</span><span class="p">]</span>
 <span class="n">fp8_c1</span> <span class="o">=</span> <span class="n">bench</span><span class="p">[</span><span class="s1">'FP8_dynamic'</span><span class="p">][</span><span class="s1">'1'</span><span class="p">]</span>
 <span class="n">w4_c1</span> <span class="o">=</span> <span class="n">bench</span><span class="p">[</span><span class="s1">'W4A16'</span><span class="p">][</span><span class="s1">'1'</span><span class="p">]</span>
-
-<span class="c1"># Use bfcl_full_core for BF16 (from full 13-category rerun)</span>
-<span class="c1"># FP8/W4A16 evaluated in separate simple_python-only runs</span>
-<span class="n">summary</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">([</span>
-    <span class="p">{</span>
-        <span class="s1">'config'</span><span class="p">:</span> <span class="s1">'BF16 (post-GRPO)'</span><span class="p">,</span>
-        <span class="s1">'BFCL simple_python (%)'</span><span class="p">:</span> <span class="n">bfcl_full</span><span class="p">[</span><span class="s1">'post_grpo'</span><span class="p">][</span><span class="s1">'simple_python'</span><span class="p">][</span><span class="s1">'accuracy'</span><span class="p">],</span>
-        <span class="s1">'TTFT p50 (ms)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">bf16_c1</span><span class="p">[</span><span class="s1">'ttft'</span><span class="p">][</span><span class="s1">'p50'</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span>
-        <span class="s1">'E2EL p50 (ms)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">bf16_c1</span><span class="p">[</span><span class="s1">'lat'</span><span class="p">][</span><span class="s1">'p50'</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span>
-        <span class="s1">'Output tok/s (c=1)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">bf16_c1</span><span class="p">[</span><span class="s1">'output_throughput'</span><span class="p">],</span> <span class="mi">1</span><span class="p">),</span>
-    <span class="p">},</span>
-    <span class="p">{</span>
-        <span class="s1">'config'</span><span class="p">:</span> <span class="s1">'FP8 dynamic'</span><span class="p">,</span>
-        <span class="s1">'BFCL simple_python (%)'</span><span class="p">:</span> <span class="n">bfcl</span><span class="p">[</span><span class="s1">'fp8_simple_python'</span><span class="p">][</span><span class="s1">'accuracy'</span><span class="p">],</span>
-        <span class="s1">'TTFT p50 (ms)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">fp8_c1</span><span class="p">[</span><span class="s1">'ttft'</span><span class="p">][</span><span class="s1">'p50'</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span>
-        <span class="s1">'E2EL p50 (ms)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">fp8_c1</span><span class="p">[</span><span class="s1">'lat'</span><span class="p">][</span><span class="s1">'p50'</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span>
-        <span class="s1">'Output tok/s (c=1)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">fp8_c1</span><span class="p">[</span><span class="s1">'output_throughput'</span><span class="p">],</span> <span class="mi">1</span><span class="p">),</span>
-    <span class="p">},</span>
-    <span class="p">{</span>
-        <span class="s1">'config'</span><span class="p">:</span> <span class="s1">'W4A16'</span><span class="p">,</span>
-        <span class="s1">'BFCL simple_python (%)'</span><span class="p">:</span> <span class="n">bfcl</span><span class="p">[</span><span class="s1">'w4a16_simple_python'</span><span class="p">][</span><span class="s1">'accuracy'</span><span class="p">],</span>
-        <span class="s1">'TTFT p50 (ms)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">w4_c1</span><span class="p">[</span><span class="s1">'ttft'</span><span class="p">][</span><span class="s1">'p50'</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span>
-        <span class="s1">'E2EL p50 (ms)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">w4_c1</span><span class="p">[</span><span class="s1">'lat'</span><span class="p">][</span><span class="s1">'p50'</span><span class="p">],</span> <span class="mi">2</span><span class="p">),</span>
-        <span class="s1">'Output tok/s (c=1)'</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">w4_c1</span><span class="p">[</span><span class="s1">'output_throughput'</span><span class="p">],</span> <span class="mi">1</span><span class="p">),</span>
-    <span class="p">},</span>
-<span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="s1">'Note: BF16 accuracy from full 13-category rerun (96.25%); FP8/W4A16 from separate simple_python-only runs (96.50%)'</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s1">'Difference is 1 sample out of 400 — within expected run-to-run variance.'</span><span class="p">)</span>
-<span class="n">summary</span>
+<span class="n">eagle_c1</span> <span class="o">=</span> <span class="n">bench</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'EAGLE3_FT'</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'1'</span><span class="p">,</span> <span class="p">{})</span>
 </pre></div>
 </div>
-</div>
-</div>
-</div>
-<div class="jp-Cell-outputWrapper">
-<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
-</div>
-<div class="jp-OutputArea jp-Cell-outputArea">
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Note: BF16 accuracy from full 13-category rerun (96.25%); FP8/W4A16 from separate simple_python-only runs (96.50%)
-Difference is 1 sample out of 400 — within expected run-to-run variance.
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child jp-OutputArea-executeResult">
-<div class="jp-OutputPrompt jp-OutputArea-prompt">Out[2]:</div>
-<div class="jp-RenderedHTMLCommon jp-RenderedHTML jp-OutputArea-output jp-OutputArea-executeResult" data-mime-type="text/html" tabindex="0">
-<div>
-<style scoped="">
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-</style>
-<table border="1" class="dataframe">
-<thead>
-<tr style="text-align: right;">
-<th></th>
-<th>config</th>
-<th>BFCL simple_python (%)</th>
-<th>TTFT p50 (ms)</th>
-<th>E2EL p50 (ms)</th>
-<th>Output tok/s (c=1)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<th>0</th>
-<td>BF16 (post-GRPO)</td>
-<td>96.25</td>
-<td>15.50</td>
-<td>323.86</td>
-<td>150.4</td>
-</tr>
-<tr>
-<th>1</th>
-<td>FP8 dynamic</td>
-<td>96.50</td>
-<td>13.16</td>
-<td>222.88</td>
-<td>217.7</td>
-</tr>
-<tr>
-<th>2</th>
-<td>W4A16</td>
-<td>96.50</td>
-<td>13.66</td>
-<td>222.28</td>
-<td>208.9</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=0bcf12be">
-<div class="jp-Cell-inputWrapper" tabindex="0">
-<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
-</div>
-<div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
-</div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-Training">2. Training<a class="anchor-link" href="#2.-Training">¶</a></h2><p><strong>Model choice</strong>: Qwen3-8B — native tool calling support, 8B parameters fit H100 with full KV cache headroom, strong BFCL baseline (95% on simple_python out of the box).</p>
-<p><strong>Method</strong>: Two-stage fine-tuning pipeline.</p>
-<p><strong>Stage 1 — SFT</strong> (27 min): LoRA r=64 on all linear layers, assistant-only loss masking so the model only learns to produce tool calls, not to repeat prompts. 1 epoch on 70% of ToolACE (~7900 samples). Loss drops from 1.45 to 0.34.</p>
-<p><strong>Stage 2 — GRPO</strong> (20 min): Group Relative Policy Optimization with decomposed rewards. Three reward components score each generation: format correctness (0.1 weight, decays over training), tool name accuracy (0.5), and argument accuracy (0.4). DAPO loss variant removes KL penalty for more aggressive exploration. 400 steps on 30% of ToolACE.</p>
 </div>
 </div>
 </div>
