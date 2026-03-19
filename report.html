@@ -7802,15 +7802,11 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h1 id="Qwen3-8B-Tool-Calling:-Real-Report">Qwen3-8B Tool Calling: Real Report<a class="anchor-link" href="#Qwen3-8B-Tool-Calling:-Real-Report">¶</a></h1><p>Fresh report generated from measurements collected on <strong>2026-03-18</strong>.</p>
-<h2 id="Scope">Scope<a class="anchor-link" href="#Scope">¶</a></h2><ul>
-<li>Fine-tuning pipeline: <strong>Baseline -&gt; SFT -&gt; GRPO</strong></li>
-<li>Inference configs: <strong>BF16, FP8 dynamic, W4A16</strong></li>
-<li>Serving benchmark tool: <strong><code>vllm bench serve</code></strong></li>
-<li>Quality benchmark: <strong>BFCL v4 <code>simple_python</code> subset</strong> for fresh confirmed numbers</li>
-<li>Hardware: <strong>NVIDIA H100 80GB HBM3</strong></li>
-</ul>
-<p>This notebook only uses verified artifacts currently present in <code>results/</code>.</p>
+<h1 id="Financial-Workflow-Automation-with-LLMs">Financial Workflow Automation with LLMs<a class="anchor-link" href="#Financial-Workflow-Automation-with-LLMs">¶</a></h1><h2 id="Qwen3-8B-Fine-Tuned-for-Tool-Calling">Qwen3-8B Fine-Tuned for Tool Calling<a class="anchor-link" href="#Qwen3-8B-Fine-Tuned-for-Tool-Calling">¶</a></h2><p><strong>Client</strong>: FinTech startup automating financial workflows (fraud detection, transaction processing)
+<strong>Requirement</strong>: Precise function calling via natural language → internal APIs
+<strong>Priority</strong>: Accuracy → Latency → Cost</p>
+<p><strong>Approach</strong>: Fine-tune Qwen3-8B on ToolACE dataset via SFT + GRPO, optimize inference with FP8 quantization and EAGLE-3 speculative decoding.</p>
+<p><strong>Key result</strong>: 96.25% accuracy on BFCL Python subset, 175ms E2EL at c=1 with EAGLE-3 (1.85x faster than BF16 baseline), serving 4378 tok/s at c=32.</p>
 </div>
 </div>
 </div>
@@ -8000,13 +7996,7 @@ a.anchor-link {
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1.-Executive-Summary">1. Executive Summary<a class="anchor-link" href="#1.-Executive-Summary">¶</a></h2><p>The full latency benchmark matrix was rerun across <strong>15 real measurements</strong>:</p>
-<ul>
-<li>3 serving configs: <code>BF16</code>, <code>FP8_dynamic</code>, <code>W4A16</code></li>
-<li>5 concurrency levels: <code>1, 4, 8, 16, 32</code></li>
-<li>metrics from <code>vllm bench serve</code>: <code>TTFT</code>, <code>TPOT</code>, <code>ITL</code>, <code>E2EL</code>, throughput</li>
-</ul>
-<p>Fresh BFCL reruns currently confirmed the assignment-critical <code>simple_python</code> subset for baseline, post-SFT, post-GRPO, FP8, and W4A16.</p>
+<h2 id="1.-Executive-Summary">1. Executive Summary<a class="anchor-link" href="#1.-Executive-Summary">¶</a></h2><p>We evaluated 4 serving configurations on real ToolACE prompts, measured with <code>vllm bench serve</code>:</p>
 </div>
 </div>
 </div>
@@ -8134,12 +8124,10 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="2.-Training-Signal">2. Training Signal<a class="anchor-link" href="#2.-Training-Signal">¶</a></h2><p>The final model quality comes from the <code>SFT -&gt; GRPO</code> pipeline.</p>
-<p>Below I show:</p>
-<ul>
-<li><strong>SFT loss</strong> extracted from the real training log (<code>logs/run_exp2.log</code>)</li>
-<li><strong>GRPO reward curves</strong> from <code>results/grpo_rewards.json</code></li>
-</ul>
+<h2 id="2.-Training">2. Training<a class="anchor-link" href="#2.-Training">¶</a></h2><p><strong>Model choice</strong>: Qwen3-8B — native tool calling support, 8B parameters fit H100 with full KV cache headroom, strong BFCL baseline (95% on simple_python out of the box).</p>
+<p><strong>Method</strong>: Two-stage fine-tuning pipeline.</p>
+<p><strong>Stage 1 — SFT</strong> (27 min): LoRA r=64 on all linear layers, assistant-only loss masking so the model only learns to produce tool calls, not to repeat prompts. 1 epoch on 70% of ToolACE (~7900 samples). Loss drops from 1.45 to 0.34.</p>
+<p><strong>Stage 2 — GRPO</strong> (20 min): Group Relative Policy Optimization with decomposed rewards. Three reward components score each generation: format correctness (0.1 weight, decays over training), tool name accuracy (0.5), and argument accuracy (0.4). DAPO loss variant removes KL penalty for more aggressive exploration. 400 steps on 30% of ToolACE.</p>
 </div>
 </div>
 </div>
@@ -8150,7 +8138,7 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="SFT-Loss">SFT Loss<a class="anchor-link" href="#SFT-Loss">¶</a></h3><p>Real SFT loss extracted from <code>logs/run_exp2.log</code>.</p>
+<h3 id="SFT-Loss">SFT Loss<a class="anchor-link" href="#SFT-Loss">¶</a></h3><p>470 training steps, real loss from <code>logs/run_exp2.log</code>. Raw curve shown in light, EMA-smoothed in bold.</p>
 </div>
 </div>
 </div>
@@ -8279,7 +8267,8 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="3.-BFCL-Quality">3. BFCL Quality<a class="anchor-link" href="#3.-BFCL-Quality">¶</a></h2>
+<h2 id="3.-Quality-(BFCL-v4)">3. Quality (BFCL v4)<a class="anchor-link" href="#3.-Quality-(BFCL-v4)">¶</a></h2><p>We evaluated on the full BFCL v4 benchmark (13 categories, 3641 samples) for baseline → SFT → GRPO. Quantized models (FP8, W4A16) were spot-checked on the assignment-critical <code>simple_python</code> subset (400 samples).</p>
+<p><strong>Main finding</strong>: SFT drives the biggest quality gain (+5.7pp weighted core accuracy). GRPO further improves structured categories like <code>parallel_multiple</code> (+7.5pp) at the cost of slight regression on <code>irrelevance</code> (−1.3pp).</p>
 </div>
 </div>
 </div>
@@ -8290,14 +8279,8 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="Quantized-preservation-check-on-simple_python">Quantized preservation check on simple_python<a class="anchor-link" href="#Quantized-preservation-check-on-simple_python">¶</a></h3><p>BFCL runs on <code>simple_python</code> show a clean quality trend:</p>
-<ul>
-<li>Baseline: <strong>95.00%</strong></li>
-<li>Post-SFT: <strong>95.75%</strong></li>
-<li>Post-GRPO: <strong>96.50%</strong></li>
-<li>FP8: <strong>96.50%</strong></li>
-<li>W4A16: <strong>96.50%</strong></li>
-</ul>
+<h3 id="Quality-preservation-under-quantization">Quality preservation under quantization<a class="anchor-link" href="#Quality-preservation-under-quantization">¶</a></h3><p>FP8 and W4A16 both preserve accuracy on <code>simple_python</code> — in fact scoring slightly higher (96.50%) than the full-rerun BF16 (96.25%), within 1-sample binomial noise (Wilson 95% CI overlaps).</p>
+<p>EAGLE-3 is <strong>lossless by construction</strong>: every accepted token is verified by the target model. No separate quality evaluation needed.</p>
 </div>
 </div>
 </div>
@@ -8603,32 +8586,24 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="4.-Latency-and-Throughput">4. Latency and Throughput<a class="anchor-link" href="#4.-Latency-and-Throughput">¶</a></h2><p>All latency numbers measured with <strong><code>vllm bench serve</code></strong> (standard vLLM benchmarking tool).</p>
-<h3 id="Benchmark-datasets">Benchmark datasets<a class="anchor-link" href="#Benchmark-datasets">¶</a></h3><table>
+<h2 id="4.-Latency-and-Throughput">4. Latency and Throughput<a class="anchor-link" href="#4.-Latency-and-Throughput">¶</a></h2><p>All latency measured with <a href="https://docs.vllm.ai/en/latest/cli/bench/serve.html"><code>vllm bench serve</code></a> on <strong>real ToolACE prompts</strong> from the held-out split. 100 requests per concurrency level, 5 warmup rounds, tools included in every request.</p>
+<p>The client expects <strong>16-32 concurrent requests</strong> in production. We benchmark at c=1 (single-user latency), c=16 and c=32 (production load).</p>
+<table>
 <thead>
 <tr>
 <th>Dataset</th>
 <th style="text-align:center">Prompts</th>
-<th style="text-align:center">Avg output tokens</th>
 <th>Use case</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>bench_prompts.jsonl</code></td>
-<td style="text-align:center">20 (oversampled to 100)</td>
-<td style="text-align:center">~30</td>
-<td>Short tool-calling requests (weather, flights, math, etc.)</td>
-</tr>
-<tr>
-<td><code>bench_long_agent_smoke.jsonl</code></td>
-<td style="text-align:center">8</td>
-<td style="text-align:center">~256</td>
-<td>Long agent-style post-tool responses (fraud analysis, compliance memos, etc.)</td>
+<td><code>bench_toolace.jsonl</code></td>
+<td style="text-align:center">100 (from ToolACE held-out split)</td>
+<td>Real tool-calling requests</td>
 </tr>
 </tbody>
 </table>
-<p>All numbers in the main latency charts below are from the <strong>short tool-calling dataset</strong> at 100 requests per concurrency level, with 5 warmup rounds. Tools are included in every request via <code>--extra-body</code>.</p>
 </div>
 </div>
 </div>
@@ -8639,7 +8614,7 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="VLLM-vs-SgLang">VLLM vs SgLang<a class="anchor-link" href="#VLLM-vs-SgLang">¶</a></h3>
+<h3 id="Engine-selection:-vLLM-vs-SGLang">Engine selection: vLLM vs SGLang<a class="anchor-link" href="#Engine-selection:-vLLM-vs-SGLang">¶</a></h3><p>We benchmarked both vLLM and SGLang on BF16. <strong>vLLM won on all metrics</strong> — lower latency, higher throughput, and native EAGLE-3 support. SGLang's EAGLE path required manual checkpoint patching and still underperformed.</p>
 </div>
 </div>
 </div>
@@ -8810,8 +8785,7 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<p>Latency was measured with <strong><code>vllm bench serve</code></strong> against an OpenAI-compatible chat endpoint with tool definitions included in the request body.</p>
-<p>The next figure restores the richer style: median line plus interquartile band, with the 95th percentile drawn as a dashed reference.</p>
+<h3 id="Latency-by-quantization-config">Latency by quantization config<a class="anchor-link" href="#Latency-by-quantization-config">¶</a></h3><p>Four lines per subplot: BF16, FP8 dynamic, W4A16, EAGLE3 fine-tuned. Solid = p50 (median), dashed = p95, shaded = IQR (p25-p75). Values annotated at c=32.</p>
 </div>
 </div>
 </div>
@@ -9088,42 +9062,33 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="5.-EAGLE-3-Speculative-Decoding">5. EAGLE-3 Speculative Decoding<a class="anchor-link" href="#5.-EAGLE-3-Speculative-Decoding">¶</a></h2><p>EAGLE-3 uses a small draft model to propose multiple tokens per step, verified by the target model in a single forward pass.</p>
-<h3 id="What-we-tried-and-what-worked">What we tried and what worked<a class="anchor-link" href="#What-we-tried-and-what-worked">¶</a></h3><table>
+<h2 id="5.-EAGLE-3-Speculative-Decoding">5. EAGLE-3 Speculative Decoding<a class="anchor-link" href="#5.-EAGLE-3-Speculative-Decoding">¶</a></h2><p>EAGLE-3 uses a small draft model to propose multiple tokens per step, verified by the target model in a single forward pass. It is <strong>lossless</strong>: output is identical to standard decoding.</p>
+<h3 id="What-worked-and-what-didn't">What worked and what didn't<a class="anchor-link" href="#What-worked-and-what-didn't">¶</a></h3><p>Our first attempt trained the draft from scratch on ToolACE — it failed because the draft only learned JSON token patterns and had poor acceptance rate on natural language (val accuracy: 0.62/0.39/0.24 for tokens 0/1/2).</p>
+<p><strong>The fix</strong>: fine-tune the official <code>RedHatAI/Qwen3-8B-speculator.eagle3</code> (already trained on general text) on ToolACE for just 1 epoch. This preserves general capability while adapting to our domain (val accuracy: <strong>0.82/0.64/0.49</strong>).</p>
+<table>
 <thead>
 <tr>
 <th>Attempt</th>
-<th>Draft source</th>
-<th style="text-align:center">Val accuracy (token 0/1/2)</th>
+<th style="text-align:center">Val accuracy (tok 0/1/2)</th>
 <th style="text-align:center">E2EL speedup</th>
-<th style="text-align:center">Status</th>
+<th style="text-align:center">Outcome</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Train from scratch on ToolACE</td>
-<td>Random init</td>
 <td style="text-align:center">0.62 / 0.39 / 0.24</td>
 <td style="text-align:center">0.77x (slower)</td>
 <td style="text-align:center">Failed</td>
 </tr>
 <tr>
-<td>Deploy via SGLang</td>
-<td>Our checkpoint</td>
-<td style="text-align:center">N/A</td>
-<td style="text-align:center">0.69x (slower)</td>
-<td style="text-align:center">Failed</td>
-</tr>
-<tr>
 <td><strong>Fine-tune official on ToolACE</strong></td>
-<td><strong>RedHatAI/Qwen3-8B-speculator.eagle3</strong></td>
 <td style="text-align:center"><strong>0.82 / 0.64 / 0.49</strong></td>
-<td style="text-align:center"><strong>1.77x</strong></td>
+<td style="text-align:center"><strong>1.85x</strong></td>
 <td style="text-align:center"><strong>Success</strong></td>
 </tr>
 </tbody>
 </table>
-<h3 id="Key-insight">Key insight<a class="anchor-link" href="#Key-insight">¶</a></h3><p>The official draft was already well-trained on general text. Fine-tuning it on ToolACE for just 1 epoch adapted it to our domain while preserving general capability. Training from scratch on ToolACE-only data produced a draft that could only predict JSON tokens, tanking acceptance on everything else.</p>
 </div>
 </div>
 </div>
@@ -9272,16 +9237,13 @@ Difference is 1 sample out of 400 — within expected run-to-run variance.
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="EAGLE3-deployment">EAGLE3 deployment<a class="anchor-link" href="#EAGLE3-deployment">¶</a></h3><div class="highlight"><pre><span></span><span class="c1"># Serve with EAGLE3 speculative decoding</span>
+<h3 id="Deployment">Deployment<a class="anchor-link" href="#Deployment">¶</a></h3><div class="highlight"><pre><span></span><span class="c1"># Recommended: EAGLE3 + production optimizations</span>
 bash<span class="w"> </span>scripts/serve_eagle.sh
 
-<span class="c1"># Or with FP8 + EAGLE3</span>
+<span class="c1"># With FP8 quantization</span>
 bash<span class="w"> </span>scripts/serve_eagle.sh<span class="w"> </span>--quantization<span class="w"> </span>fp8
-
-<span class="c1"># Evaluate EAGLE3 on BFCL</span>
-python<span class="w"> </span>scripts/eval.py<span class="w"> </span>--configs<span class="w"> </span>eagle3<span class="w"> </span>--test-category<span class="w"> </span>simple_python
 </pre></div>
-<p>Weights: <a href="https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3">kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3</a></p>
+<p>Draft weights: <a href="https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3">kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3</a></p>
 </div>
 </div>
 </div>
@@ -9292,23 +9254,38 @@ python<span class="w"> </span>scripts/eval.py<span class="w"> </span>--configs<s
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="6.-Recommendation">6. Recommendation<a class="anchor-link" href="#6.-Recommendation">¶</a></h2><p>Based on fresh benchmarks:</p>
-<ul>
-<li><strong>Best latency at c=1: EAGLE3 fine-tuned</strong> — E2EL p50 = 112 ms (1.8x faster than BF16)</li>
-<li><strong>Best throughput at c=32: EAGLE3 fine-tuned</strong> — 4061 tok/s (1.4x over BF16)</li>
-<li><strong>Best quality-preserving quantization: FP8 dynamic</strong> — no quality loss, 1.44x throughput over BF16</li>
-<li><strong>Production recommendation</strong>: FP8 + EAGLE3 for maximum performance, or FP8 alone for simplicity</li>
-</ul>
-<h3 id="What-fixed-EAGLE3">What fixed EAGLE3<a class="anchor-link" href="#What-fixed-EAGLE3">¶</a></h3><p>Previous EAGLE3 attempts failed because:</p>
-<ol>
-<li>Draft trained from scratch on ToolACE-only data → low acceptance rate (val acc 0.62)</li>
-<li>Deployed through SGLang with manual config patches → extra overhead</li>
-</ol>
-<p>Solution:</p>
-<ol>
-<li>Fine-tuned the official <code>RedHatAI/Qwen3-8B-speculator.eagle3</code> on ToolACE → val acc 0.82</li>
-<li>Deployed through vLLM native <code>--speculative-config</code> → no patching needed</li>
-</ol>
+<h2 id="6.-Production-Recommendation">6. Production Recommendation<a class="anchor-link" href="#6.-Production-Recommendation">¶</a></h2><table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Config</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Maximum speed</strong></td>
+<td>EAGLE3 FT</td>
+<td>1.85x E2EL speedup, lossless, 4378 tok/s at c=32</td>
+</tr>
+<tr>
+<td><strong>Simple deployment</strong></td>
+<td>FP8 dynamic</td>
+<td>No draft model needed, 1.5x throughput, zero quality loss</td>
+</tr>
+<tr>
+<td><strong>Minimum footprint</strong></td>
+<td>W4A16</td>
+<td>5.7 GB model size (vs 16 GB BF16), good latency</td>
+</tr>
+<tr>
+<td><strong>Baseline</strong></td>
+<td>BF16</td>
+<td>No optimization, simplest to debug</td>
+</tr>
+</tbody>
+</table>
+<p>All configs served via vLLM with prefix caching, chunked prefill, and hermes tool-call parser.</p>
 </div>
 </div>
 </div>
@@ -9319,7 +9296,7 @@ python<span class="w"> </span>scripts/eval.py<span class="w"> </span>--configs<s
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="7.-Error-Analysis">7. Error Analysis<a class="anchor-link" href="#7.-Error-Analysis">¶</a></h2><p>Failure categorization from BFCL score files. Shows the most common error types per category for the post-GRPO model.</p>
+<h2 id="7.-Error-Analysis">7. Error Analysis<a class="anchor-link" href="#7.-Error-Analysis">¶</a></h2><p>Where does the model still fail? We analyzed BFCL score files for the post-GRPO model to categorize errors.</p>
 </div>
 </div>
 </div>
@@ -9539,13 +9516,15 @@ python<span class="w"> </span>scripts/eval.py<span class="w"> </span>--configs<s
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h3 id="Key-Failure-Patterns">Key Failure Patterns<a class="anchor-link" href="#Key-Failure-Patterns">¶</a></h3><ul>
-<li><strong>Irrelevance categories</strong>: Model generates valid tool calls when it should refuse → false positive problem</li>
-<li><strong>Java/JavaScript</strong>: AST parsing failures due to language-specific syntax differences</li>
-<li><strong>Parallel/parallel_multiple</strong>: Wrong number of function calls — model under-generates or over-generates</li>
-<li><strong>Live categories</strong>: Mix of syntax errors, wrong parameter values, missing parameters</li>
-<li><strong>Live irrelevance</strong>: Same false-positive pattern as non-live irrelevance</li>
-</ul>
+<h3 id="Failure-patterns">Failure patterns<a class="anchor-link" href="#Failure-patterns">¶</a></h3><p>The two dominant failure modes:</p>
+<ol>
+<li><p><strong>False positives on irrelevance</strong> (210 failures): The model generates valid-looking tool calls when it should refuse. This is the single largest error category and affects both <code>irrelevance</code> and <code>live_irrelevance</code>. A potential fix: add irrelevance-detection reward to GRPO.</p>
+</li>
+<li><p><strong>Structural errors</strong> (parallel/multiple): Wrong number of function calls — the model under-generates or over-generates when multiple parallel calls are expected. GRPO improved <code>parallel_multiple</code> significantly (+7.5pp) but there's still room.</p>
+</li>
+<li><p><strong>Language-specific AST failures</strong> (Java/JS): The model occasionally produces Python-style syntax in Java/JavaScript contexts. Not critical for the client's Python-only use case.</p>
+</li>
+</ol>
 </div>
 </div>
 </div>
@@ -9556,20 +9535,47 @@ python<span class="w"> </span>scripts/eval.py<span class="w"> </span>--configs<s
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="8.-Reproducibility-Notes">8. Reproducibility Notes<a class="anchor-link" href="#8.-Reproducibility-Notes">¶</a></h2><p>Fresh artifacts used in this notebook:</p>
+<h2 id="8.-Reproducibility">8. Reproducibility<a class="anchor-link" href="#8.-Reproducibility">¶</a></h2><p>All code, configs, and result files are in <a href="https://github.com/aimedvedevq/toolaceqwen">github.com/aimedvedevq/toolaceqwen</a>.</p>
+<p>Models on HuggingFace:</p>
 <ul>
-<li><code>results/bench_inference.json</code></li>
-<li><code>results/bfcl_results.json</code></li>
-<li>raw <code>vllm bench serve</code> outputs in <code>results/bench/</code></li>
-<li>raw BFCL runs in:<ul>
-<li><code>results/bfcl_baseline_fresh/</code></li>
-<li><code>results/bfcl_sft_fresh/</code></li>
-<li><code>results/bfcl_grpo/</code></li>
-<li><code>results/bfcl_fp8_fix2/</code></li>
-<li><code>results/bfcl_w4a16_fix/</code></li>
+<li><a href="https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE">kenkaneki/Qwen3-8B-ToolACE</a> — post-GRPO merged (BF16)</li>
+<li><a href="https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE-W4A16">kenkaneki/Qwen3-8B-ToolACE-W4A16</a> — W4A16 quantized</li>
+<li><a href="https://huggingface.co/kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3">kenkaneki/Qwen3-8B-ToolACE-speculator.eagle3</a> — EAGLE-3 draft head</li>
 </ul>
-</li>
-</ul>
+<div class="highlight"><pre><span></span><span class="c1"># Full pipeline from scratch</span>
+make<span class="w"> </span>train<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>make<span class="w"> </span>quantize<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>make<span class="w"> </span><span class="nb">eval</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>make<span class="w"> </span>bench<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>make<span class="w"> </span>report
+</pre></div>
+<table>
+<thead>
+<tr>
+<th>Artifact</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BFCL accuracy</td>
+<td><code>results/bfcl_full_core.json</code></td>
+</tr>
+<tr>
+<td>Latency benchmarks</td>
+<td><code>results/bench_inference.json</code></td>
+</tr>
+<tr>
+<td>GRPO training curves</td>
+<td><code>results/grpo_rewards.json</code></td>
+</tr>
+<tr>
+<td>Error analysis</td>
+<td><code>results/error_analysis.json</code></td>
+</tr>
+<tr>
+<td>Raw bench outputs</td>
+<td><code>results/bench/*.json</code></td>
+</tr>
+</tbody>
+</table>
+<p>Hardware: NVIDIA H100 80GB HBM3. Total training time: ~62 min.</p>
 </div>
 </div>
 </div>
