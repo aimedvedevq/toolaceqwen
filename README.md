@@ -42,12 +42,15 @@ ToolACE (11,300 samples) → 70/30 split
 | BF16 | 1 | 14.6 ms | 197.8 ms | 146.7 |
 | FP8 dynamic | 1 | 11.7 ms | 139.5 ms | 211.9 |
 | W4A16 | 1 | 12.2 ms | 142.8 ms | 203.0 |
+| **EAGLE3 FT** | **1** | **18.8 ms** | **111.8 ms** | **268.8** |
 | BF16 | 16 | 29.6 ms | 233.0 ms | 1861.1 |
 | FP8 dynamic | 16 | 26.1 ms | 177.4 ms | 2474.0 |
 | W4A16 | 16 | 27.7 ms | 185.0 ms | 2384.1 |
+| **EAGLE3 FT** | **16** | **36.9 ms** | **170.4 ms** | **2577.8** |
 | BF16 | 32 | 33.6 ms | 271.8 ms | 2933.4 |
 | FP8 dynamic | 32 | 33.0 ms | 247.3 ms | 3268.1 |
 | W4A16 | 32 | 29.8 ms | 237.1 ms | 3362.0 |
+| **EAGLE3 FT** | **32** | **56.2 ms** | **202.1 ms** | **4061.1** |
 
 ## Quick Start
 
@@ -78,6 +81,7 @@ scripts/
     eval.py               BFCL evaluation (multi-config, auto server management)
     bench.py              Inference benchmark via vllm bench serve
     serve.sh              vLLM production serving with hermes tool calling
+    serve_eagle.sh        vLLM serving with EAGLE-3 speculative decoding
     run_inference_vm.py   Recommended VM inference launcher
     train_eagle.py        EAGLE-3 training (experimental)
     finetune_eagle.py     EAGLE-3 fine-tuning from official checkpoint
@@ -104,14 +108,14 @@ requirements.lock         Pinned dependency versions
 7. **Decomposed rewards** — Format (0.1), Tool Name (0.5), Tool Args (0.4) with format decay
 8. **FP8 dynamic** — Best accuracy-latency tradeoff; ~1.44x throughput with no quality loss
 9. **W4A16 + ToolACE calibration** — Domain-matched calibration for better quantization
-10. **EAGLE-3** — Investigated; official checkpoint + domain fine-tune approach documented
+10. **EAGLE-3 fine-tuned** — Official `RedHatAI/Qwen3-8B-speculator.eagle3` fine-tuned on ToolACE, deployed via vLLM native speculative-config. Gives **1.8x E2EL speedup** at c=1.
 
 ## Known Limitations
 
 - No ablation study (LoRA rank, SFT-only vs GRPO-only)
 - FP8/W4A16 evaluated only on `simple_python`, not full BFCL categories
-- EAGLE-3 speculative decoding did not outperform baseline in our tests
 - SGLang showed worse performance than vLLM on this workload
+- EAGLE3 TTFT is slightly higher than BF16 baseline due to draft overhead
 
 ## Hardware
 
