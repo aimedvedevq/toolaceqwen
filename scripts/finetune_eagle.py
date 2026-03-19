@@ -1,25 +1,3 @@
-#!/usr/bin/env python3
-"""
-Fine-tune the official RedHatAI/Qwen3-8B-speculator.eagle3 draft head
-on ToolACE data to improve acceptance rate on tool-calling prompts.
-
-Strategy:
-  1. Generate hidden states from our GRPO-merged verifier using ToolACE
-  2. Fine-tune the official EAGLE3 draft head starting from pre-trained weights
-  3. Deploy via vLLM (native path, no SGLang workarounds needed)
-
-Why this works:
-  - Official draft is already well-trained on general text → high baseline
-  - Fine-tuning on ToolACE adapts the draft distribution to our tool-call
-    token patterns → higher acceptance rate on function-call outputs
-  - Using vLLM keeps the serving path simple and production-ready
-
-Usage:
-    python scripts/finetune_eagle.py            # full pipeline
-    python scripts/finetune_eagle.py --skip-datagen  # if datagen already done
-    python scripts/finetune_eagle.py --bench-only
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -39,7 +17,6 @@ PORT = 8200
 SPECULATORS_SCRIPTS = Path("/home/ray/speculators/scripts")
 
 
-# ── Data ──────────────────────────────────────────────────────────────────────
 
 def prepare_toolace_data(max_samples: int = 3000) -> str:
     """Build fine-tuning data from ToolACE (our target domain)."""
@@ -71,7 +48,6 @@ def prepare_toolace_data(max_samples: int = 3000) -> str:
     return DATA_FILE
 
 
-# ── Step 1: Hidden-state generation ───────────────────────────────────────────
 
 def run_datagen(max_samples: int) -> bool:
     datagen_dir = f"{OUTPUT_DIR}/datagen"
@@ -93,7 +69,6 @@ def run_datagen(max_samples: int) -> bool:
     return rc.returncode == 0
 
 
-# ── Step 2: Fine-tune draft head ───────────────────────────────────────────────
 
 def run_finetune(epochs: int = 3, lr: float = 5e-5) -> bool:
     """
@@ -106,10 +81,6 @@ def run_finetune(epochs: int = 3, lr: float = 5e-5) -> bool:
     ckpt_dir = f"{OUTPUT_DIR}/checkpoints"
     vocab_dir = f"{OUTPUT_DIR}/vocab_mapping"
 
-    # ── Vocab mapping (reuse official draft's d2t / t2d if available) ─────────
-    # The official speculator includes vocab mapping in model.safetensors.
-    # We need d2t/t2d .npy files for the speculators trainer.
-    # If they don't exist from a prior datagen run, build them now.
     d2t_path = f"{vocab_dir}/d2t.npy"
     t2d_path = f"{vocab_dir}/t2d.npy"
     if not Path(d2t_path).exists():
@@ -200,7 +171,6 @@ def _finetune_manual_init(
     return rc.returncode == 0
 
 
-# ── Step 3: Benchmark via vLLM ────────────────────────────────────────────────
 
 def wait_server(port: int, timeout: int = 300) -> str | None:
     for _ in range(timeout // 3):

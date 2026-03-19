@@ -24,10 +24,9 @@ eval:
 bench:
 	$(PYTHON) scripts/bench.py --suite
 
-# Step 5: Execute notebook and render HTML
+# Step 5: Execute notebook
 report:
 	jupyter nbconvert --to notebook --execute report.ipynb --inplace
-	jupyter nbconvert --to html report.ipynb --output report.html
 
 # Serve model (default: FP8 dynamic)
 serve:

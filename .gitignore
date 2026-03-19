@@ -22,7 +22,7 @@ unsloth_compiled_cache/
 *.log
 logs/
 
-# Generated reports
+# Generated reports (render locally with: jupyter nbconvert --to html report.ipynb)
 report.html
 report_rendered.ipynb
 report_executed.ipynb
